@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.conda/
 *.egg-info/
 data/
 third_party/spider_eval/__pycache__/
