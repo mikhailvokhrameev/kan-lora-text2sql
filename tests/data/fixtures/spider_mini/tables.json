@@ -1,0 +1,21 @@
+[
+  {
+    "db_id": "concert_singer",
+    "table_names_original": ["stadium", "singer"],
+    "column_names_original": [
+      [-1, "*"],
+      [0, "Stadium_ID"],
+      [0, "Location"],
+      [0, "Name"],
+      [1, "Singer_ID"],
+      [1, "Name"]
+    ],
+    "column_types": ["text", "number", "text", "text", "number", "text"]
+  },
+  {
+    "db_id": "pets_1",
+    "table_names_original": ["Student"],
+    "column_names_original": [[-1, "*"], [0, "StuID"], [0, "LName"]],
+    "column_types": ["text", "number", "text"]
+  }
+]
