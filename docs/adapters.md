@@ -1,9 +1,11 @@
-# Адаптеры: базис, интерфейс, LoRA, DoRA
+# Адаптеры: базис, интерфейс, LoRA, DoRA, KAN-LoRA
 
 **Модули:** `src/kanlora/adapters/spline.py`, `src/kanlora/adapters/kan_layer.py`,
-`src/kanlora/adapters/base.py`, `src/kanlora/adapters/lora.py`, `src/kanlora/adapters/dora.py`
+`src/kanlora/adapters/base.py`, `src/kanlora/adapters/lora.py`, `src/kanlora/adapters/dora.py`,
+`src/kanlora/adapters/kan_lora.py`
 **Тесты:** `tests/adapters/test_spline.py`, `tests/adapters/test_kan_layer.py`,
-`tests/adapters/test_base.py`, `tests/adapters/test_lora.py`, `tests/adapters/test_dora.py`
+`tests/adapters/test_base.py`, `tests/adapters/test_lora.py`, `tests/adapters/test_dora.py`,
+`tests/adapters/test_kan_lora.py`
 
 ## Зачем общий интерфейс
 
@@ -82,8 +84,8 @@ self.scaling = config.alpha / config.rank
 ## B-сплайновый базис (`spline.py`)
 
 Чистая математика без обучаемых параметров — строительный блок для слоя
-Колмогорова — Арнольда (`KANLayer`), используемого им, но пока не
-подключённого ни к одному адаптеру.
+Колмогорова — Арнольда (`KANLayer`), который, в свою очередь, вставлен
+между двумя низкоранговыми матрицами в `KANLoRALinear` (см. ниже).
 
 - `num_basis_functions(grid_size, spline_order) -> int` — возвращает
   `grid_size + spline_order`, число базисных функций на сетке.
@@ -292,6 +294,79 @@ LoRA: при `B = 0` направление `V` в точности равно `
 «DoRA обобщает LoRA»: без независимого модуля остаётся ровно LoRA.
 Проверено `test_reduces_to_lora_when_magnitude_matches_direction_norm`.
 
+## KAN-LoRA (`kan_lora.py`)
+
+`KANLoRALinear(AdapterLinear)` — исследуемый метод и центр всей работы.
+Отличается от LoRA ровно одним элементом: между двумя низкоранговыми
+матрицами вставлен `KANLayer`, дающий обучаемую нелинейность:
+
+```
+delta_W * x = (alpha / r) * B * phi(A x)
+```
+
+где `A: (rank, in_features)`, `B: (out_features, rank)`, а
+`phi = KANLayer(rank, rank, grid_size, spline_order)`.
+
+### Параметры
+
+- `lora_a: nn.Parameter` формы `(rank, in_features)` — как в LoRA,
+  инициализация `kaiming_uniform_(a=sqrt(5))`.
+- `lora_b: nn.Parameter` формы `(out_features, rank)` — инициализируется
+  нулём, по той же причине, что и в LoRA и DoRA.
+- `kan: KANLayer` формы `(rank, rank)` — тождественный слой при
+  инициализации (см. `reset_to_identity` выше). Если `config.learn_input_scale
+  is False`, у `kan.input_scale` снимается `requires_grad` сразу после
+  создания слоя — это и есть абляционный режим, зафиксированный в
+  «Отклонениях от спецификации» плана: не «без `tanh`», а «`input_scale`,
+  заморожен на 1.0».
+
+### Почему KAN-LoRA стартует численно как LoRA
+
+`lora_b = 0` обнуляет поправку целиком независимо от того, что делает
+`kan`, — этого достаточно для `test_zero_correction_at_initialization`. Но
+центральное утверждение работы сильнее: не только на старте, а **при любых
+`lora_b`**, пока сплайны внутри `kan` тождественны, `KANLoRALinear`
+поэлементно совпадает с `LoRALinear` с теми же `lora_a`, `lora_b`. Это
+следует из тождественности `KANLayer` (см. раздел выше): `phi(u) == u`
+внутри сетки, поэтому `B * phi(A x) == B * (A x)` — ровно формула LoRA.
+Совпадение точное (`atol=1e-10`), а не приближённое, потому что тождество
+`KANLayer` само точное (свойство линейной точности B-сплайнов), а не
+результат подгонки. Проверено `test_matches_lora_with_identity_splines`;
+обратное свойство — что сдвинутые коэффициенты сплайна действительно уводят
+выход от LoRA, а не остаются мёртвым грузом, — проверено
+`test_learned_nonlinearity_moves_output_away_from_lora`.
+
+Тест на совпадение с LoRA использует вход, намеренно смасштабированный так,
+чтобы `A x` гарантированно попадало внутрь сетки `[-1, 1]` (`small_input`,
+множитель `0.02`): за пределами сетки `KANLayer` не тождественен, а
+обнуляется (см. `fraction_inside_grid`), и там формула LoRA не обязана
+воспроизводиться.
+
+### Методы
+
+- `delta(x) -> Tensor` — вычисляет `A x`, пропускает через `kan`, применяет
+  `B` и масштаб `scaling`. Попутно, как побочный эффект (`torch.no_grad()`),
+  сохраняет `kan.fraction_inside_grid(A x)` во внутреннее поле
+  `_fraction_inside_grid` — снимается на каждом проходе, а не отдельным
+  диагностическим прогоном.
+- `forward(x) -> Tensor` — `self.base(x) + self.delta(x)`.
+- `last_fraction_inside_grid() -> float | None` — последнее сохранённое
+  значение; `None` до первого прямого прохода.
+- `analytic_parameter_count() -> int` — `rank * (in_features + out_features)`
+  (как в LoRA) плюс параметры `KANLayer`:
+  `rank^2 * (grid_size + spline_order)` коэффициентов сплайна,
+  `rank^2` масштабов сплайна, `rank^2` весов базовой ветви и `rank` масштабов
+  входа (последнее — только если `learn_input_scale is True`, иначе
+  `input_scale` заморожен и не входит ни в аналитический, ни в фактический
+  счётчик обучаемых параметров).
+- `can_merge` — всегда `False`: поправка нелинейна по `x`, слить её в веса
+  основы нельзя даже после обучения. `merge()` не переопределён и
+  наследует поведение `AdapterLinear.merge()` — бросает `NotImplementedError`.
+  Отсюда следствие для замера задержки (Задача 20 плана, ещё не
+  реализована): KAN-LoRA всегда платит дополнительным проходом на
+  инференсе, в отличие от LoRA и DoRA, которые после слияния не стоят
+  ничего.
+
 ## Проверенные инварианты
 
 Тесты закрепляют свойства, на которых держится всё дальнейшее сравнение
@@ -302,32 +377,40 @@ LoRA: при `B = 0` направление `V` в точности равно `
 - Обучаемых параметров ровно столько, сколько даёт аналитическая формула
   (`test_trainable_count_excludes_frozen_base`,
   `test_parameter_count_matches_formula` в `test_lora.py`).
-- LoRA и DoRA стартуют численно неотличимыми от немодифицированной модели
-  (`test_zero_correction_at_initialization` в обоих тестовых модулях,
-  допуски `atol=1e-12` и `atol=1e-10` соответственно) — то же свойство в
-  дальнейшем требуется от KAN-LoRA, чтобы разница в качестве после
-  обучения объяснялась методом, а не разной точкой старта.
+- LoRA, DoRA и KAN-LoRA стартуют численно неотличимыми от немодифицированной
+  модели (`test_zero_correction_at_initialization` во всех трёх тестовых
+  модулях, допуски `atol=1e-12`, `atol=1e-10` и `atol=1e-12` соответственно)
+  — иначе разницу в качестве после обучения нельзя было бы приписать
+  методу, а не разной точке старта.
 - Слияние воспроизводит выход адаптера и не трогает исходный `base.weight`
-  (`test_merged_linear_reproduces_adapter_output` в обоих модулях,
-  `test_merge_does_not_touch_the_original_base` для LoRA).
+  (`test_merged_linear_reproduces_adapter_output` для LoRA и DoRA,
+  `test_merge_does_not_touch_the_original_base` для LoRA); KAN-LoRA слияние
+  явно отвергает (`test_refuses_to_merge`).
 - Градиент доходит до обучаемых параметров адаптера, но не до
   `base.weight` (`test_gradients_reach_both_matrices` для LoRA,
-  `test_gradients_reach_magnitude_and_both_matrices` для DoRA).
+  `test_gradients_reach_magnitude_and_both_matrices` для DoRA,
+  `test_gradients_reach_spline_coefficients` для KAN-LoRA, включая
+  коэффициенты сплайна внутри `kan`).
 - DoRA при `magnitude`, равной норме адаптированного направления,
   поэлементно совпадает с LoRA
-  (`test_reduces_to_lora_when_magnitude_matches_direction_norm`).
+  (`test_reduces_to_lora_when_magnitude_matches_direction_norm`); KAN-LoRA
+  при тождественных сплайнах поэлементно совпадает с LoRA
+  (`test_matches_lora_with_identity_splines`) — и расходится с ней, если
+  коэффициенты сплайна сдвинуты
+  (`test_learned_nonlinearity_moves_output_away_from_lora`).
 - `AdapterLinear` нельзя инстанцировать напрямую
   (`test_interface_cannot_be_instantiated_directly`) — абстрактные методы
   действительно абстрактны.
+- Аналитический счётчик параметров KAN-LoRA совпадает с фактическим и в
+  обычном режиме, и в режиме абляции с замороженным `input_scale`
+  (`test_parameter_count_matches_formula`,
+  `test_frozen_input_scale_is_excluded_from_training`) — расхождение между
+  ними означало бы неверную колонку «число параметров» в итоговых таблицах.
 
 ## Не реализовано
 
-- `KANLoRALinear` (`kan_lora.py`) — нелинейный адаптер, вставляющий
-  `KANLayer` между двумя низкоранговыми матрицами; ключевое требуемое
-  свойство (точное численное совпадение с LoRA при тождественных сплайнах)
-  ещё не проверено кодом, только сформулировано в плане.
 - Единый внедритель адаптеров в модель (`inject.py`).
 
-Эти пункты не описываются подробнее, чтобы не документировать
-несуществующее поведение; их интерфейсы зафиксированы в
+Этот пункт не описывается подробнее, чтобы не документировать
+несуществующее поведение; его интерфейс зафиксирован в
 `docs/superpowers/plans/2026-09-09-kan-lora-text2sql.md`.
