@@ -149,11 +149,12 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
 
 ## Не реализовано
 
-- Промпт, токенизация и маска функции потерь по SQL (`data/collate.py`,
-  задача 9 плана) — соединяют `Text2SqlExample` и `DatabaseSchema` в вход
-  модели; этот модуль ещё не написан.
 - Само чтение баз данных SQLite (для Execution Accuracy, задача 14) —
   `database_path` только строит путь, ничего не открывает.
+
+Промпт, токенизация и маска функции потерь по SQL, соединяющие
+`Text2SqlExample` и `DatabaseSchema` в вход модели, реализованы отдельно —
+см. `docs/collate.md` (`src/kanlora/data/collate.py`).
 
 Эти пункты не описываются подробнее здесь, чтобы не документировать
 несуществующее поведение; их интерфейсы зафиксированы в
