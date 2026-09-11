@@ -8,3 +8,5 @@ data/
 third_party/spider_eval/__pycache__/
 results/figures/
 CLAUDE.md
+docs/superpowers/
+.claude
