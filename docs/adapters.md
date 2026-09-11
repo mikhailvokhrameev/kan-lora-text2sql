@@ -1,9 +1,9 @@
-# Адаптеры: базис, интерфейс, LoRA
+# Адаптеры: базис, интерфейс, LoRA, DoRA
 
 **Модули:** `src/kanlora/adapters/spline.py`, `src/kanlora/adapters/kan_layer.py`,
-`src/kanlora/adapters/base.py`, `src/kanlora/adapters/lora.py`
+`src/kanlora/adapters/base.py`, `src/kanlora/adapters/lora.py`, `src/kanlora/adapters/dora.py`
 **Тесты:** `tests/adapters/test_spline.py`, `tests/adapters/test_kan_layer.py`,
-`tests/adapters/test_base.py`, `tests/adapters/test_lora.py`
+`tests/adapters/test_base.py`, `tests/adapters/test_lora.py`, `tests/adapters/test_dora.py`
 
 ## Зачем общий интерфейс
 
@@ -228,6 +228,70 @@ delta_W * x = (alpha / r) * B (A x)
 от входа нелинейно и слияние в принципе невозможно (`can_merge = False`,
 `merge()` бросает `NotImplementedError` по умолчанию из `AdapterLinear`).
 
+## DoRA (`dora.py`)
+
+`DoRALinear(AdapterLinear)` — второй опорный метод. Раскладывает вес
+основы на **модуль** (скаляр на выходной канал) и **направление**
+(матрица той же формы, что и вес), а направление адаптирует той же
+низкоранговой поправкой, что и LoRA:
+
+```
+V = W + (alpha / r) * B A                    направление, форма (out, in)
+W_eff = m * V / ||V||_строк                  эффективный вес, норма построчная
+```
+
+где `A: (rank, in_features)`, `B: (out_features, rank)`, `m: (out_features,)`
+— обучаемый вектор модуля.
+
+Замысел метода (за него DoRA отвечает на защите): при полной тонкой
+настройке модуль и направление веса меняются по независимым траекториям, а
+LoRA, добавляя поправку прямо к `W`, вынуждена менять их совместно.
+Отдельный вектор `m` снимает эту связанность ценой `out_features`
+дополнительных параметров.
+
+### Параметры
+
+- `lora_a: nn.Parameter` формы `(rank, in_features)` — как в LoRA,
+  инициализация `kaiming_uniform_(a=sqrt(5))`.
+- `lora_b: nn.Parameter` формы `(out_features, rank)` — инициализируется
+  нулём, по той же причине, что и в LoRA (иначе градиент по обеим матрицам
+  тождественно нулевой).
+- `magnitude: nn.Parameter` формы `(out_features,)` — инициализируется
+  **построчной нормой исходного веса** `base.weight.norm(dim=1)`, а не
+  единицей и не нулём.
+
+Инициализация `magnitude` нормой `base.weight` — не произвольный выбор, а
+условие того же инварианта «адаптер стартует немодифицированным», что и у
+LoRA: при `B = 0` направление `V` в точности равно `base.weight`, и если
+`m = ||base.weight||_строк`, то `m * V / ||V|| == base.weight` точно.
+Любая другая инициализация `magnitude` сдвинула бы стартовую точку DoRA
+относительно LoRA и обесценила бы сравнение методов.
+
+### Методы
+
+- `effective_weight() -> Tensor` — вычисляет `W_eff` по формуле выше;
+  вызывается на каждом прямом проходе, а не кэшируется, так как
+  `lora_a`, `lora_b` и `magnitude` обучаемы.
+- `forward(x) -> Tensor` — `linear(x, effective_weight(), base.bias)`.
+- `analytic_parameter_count() -> int` —
+  `rank * (in_features + out_features) + out_features` (LoRA плюс вектор
+  модуля).
+- `can_merge` — `True`: как и LoRA, DoRA линейна по `x` при фиксированных
+  параметрах адаптера, поэтому после обучения `effective_weight()`
+  поглощается в обычный `nn.Linear` и на инференсе не остаётся никакой
+  дополнительной надстройки.
+- `merge() -> nn.Linear` — новый `nn.Linear` с
+  `weight = effective_weight()` и скопированным `bias`; исходный `base` не
+  изменяется, аналогично `LoRALinear.merge()`.
+
+### Сводимость к LoRA
+
+При `m = ||W + s*BA||_строк` (норма самого направления, без отдельного
+обучения модуля) нормировка в `effective_weight()` сокращается и DoRA
+поэлементно совпадает с LoRA — это формальное содержание утверждения
+«DoRA обобщает LoRA»: без независимого модуля остаётся ровно LoRA.
+Проверено `test_reduces_to_lora_when_magnitude_matches_direction_norm`.
+
 ## Проверенные инварианты
 
 Тесты закрепляют свойства, на которых держится всё дальнейшее сравнение
@@ -238,22 +302,26 @@ delta_W * x = (alpha / r) * B (A x)
 - Обучаемых параметров ровно столько, сколько даёт аналитическая формула
   (`test_trainable_count_excludes_frozen_base`,
   `test_parameter_count_matches_formula` в `test_lora.py`).
-- LoRA стартует численно неотличимой от немодифицированной модели
-  (`test_zero_correction_at_initialization`, допуск `atol=1e-12`) — то же
-  свойство в дальнейшем требуется от DoRA и KAN-LoRA, чтобы разница в
-  качестве после обучения объяснялась методом, а не разной точкой старта.
+- LoRA и DoRA стартуют численно неотличимыми от немодифицированной модели
+  (`test_zero_correction_at_initialization` в обоих тестовых модулях,
+  допуски `atol=1e-12` и `atol=1e-10` соответственно) — то же свойство в
+  дальнейшем требуется от KAN-LoRA, чтобы разница в качестве после
+  обучения объяснялась методом, а не разной точкой старта.
 - Слияние воспроизводит выход адаптера и не трогает исходный `base.weight`
-  (`test_merged_linear_reproduces_adapter_output`,
-  `test_merge_does_not_touch_the_original_base`).
-- Градиент доходит до `lora_a` и `lora_b`, но не до `base.weight`
-  (`test_gradients_reach_both_matrices`).
+  (`test_merged_linear_reproduces_adapter_output` в обоих модулях,
+  `test_merge_does_not_touch_the_original_base` для LoRA).
+- Градиент доходит до обучаемых параметров адаптера, но не до
+  `base.weight` (`test_gradients_reach_both_matrices` для LoRA,
+  `test_gradients_reach_magnitude_and_both_matrices` для DoRA).
+- DoRA при `magnitude`, равной норме адаптированного направления,
+  поэлементно совпадает с LoRA
+  (`test_reduces_to_lora_when_magnitude_matches_direction_norm`).
 - `AdapterLinear` нельзя инстанцировать напрямую
   (`test_interface_cannot_be_instantiated_directly`) — абстрактные методы
   действительно абстрактны.
 
 ## Не реализовано
 
-- `DoRALinear` (`dora.py`) — разложение веса на модуль и направление.
 - `KANLoRALinear` (`kan_lora.py`) — нелинейный адаптер, вставляющий
   `KANLayer` между двумя низкоранговыми матрицами; ключевое требуемое
   свойство (точное численное совпадение с LoRA при тождественных сплайнах)
