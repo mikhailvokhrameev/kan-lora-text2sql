@@ -4,7 +4,7 @@ __pycache__/
 .venv/
 .conda/
 *.egg-info/
-data/
+/data/
 third_party/spider_eval/__pycache__/
 results/figures/
 CLAUDE.md
