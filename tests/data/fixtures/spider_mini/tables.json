@@ -10,12 +10,14 @@
       [1, "Singer_ID"],
       [1, "Name"]
     ],
-    "column_types": ["text", "number", "text", "text", "number", "text"]
+    "column_types": ["text", "number", "text", "text", "number", "text"],
+    "foreign_keys": []
   },
   {
     "db_id": "pets_1",
     "table_names_original": ["Student"],
     "column_names_original": [[-1, "*"], [0, "StuID"], [0, "LName"]],
-    "column_types": ["text", "number", "text"]
+    "column_types": ["text", "number", "text"],
+    "foreign_keys": []
   }
 ]
