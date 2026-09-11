@@ -34,6 +34,9 @@ packages = ["src/kanlora"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+markers = [
+    "slow: тесты, которые обучают крошечную модель (единицы десятков секунд)",
+]
 
 [tool.ruff]
 line-length = 100
