@@ -1,0 +1,3 @@
+[
+  {"db_id": "concert_singer", "question": "What is the largest stadium?", "query": "SELECT Name FROM stadium ORDER BY Stadium_ID DESC LIMIT 1"}
+]

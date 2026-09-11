@@ -1,0 +1,6 @@
+[
+  {"db_id": "concert_singer", "question": "How many singers are there?", "query": "SELECT count(*) FROM singer"},
+  {"db_id": "concert_singer", "question": "List all stadium names.", "query": "SELECT Name FROM stadium"},
+  {"db_id": "pets_1", "question": "How many students?", "query": "SELECT count(*) FROM Student"},
+  {"db_id": "pets_1", "question": "Last names of students.", "query": "SELECT LName FROM Student"}
+]
