@@ -1,0 +1,38 @@
+# Проверочная конфигурация. Отличается от base.yaml только размерами:
+# ту же самую команду без изменений надо запускать и для проверки на
+# 200 примерах, и для полного прогона — иначе проверенным окажется не тот
+# код, который считает результаты.
+model_name: Qwen/Qwen2.5-Coder-0.5B-Instruct
+data_root: data
+
+method: lora
+dataset: spider
+seed: 0
+
+train_subset: 200
+subsample_seed: 12345
+
+max_length: 768
+eval_limit: 50
+eval_batch_size: 8
+max_new_tokens: 128
+
+adapter:
+  rank: 8
+  alpha: 16.0
+  grid_size: 5
+  spline_order: 3
+  learn_input_scale: true
+
+train:
+  epochs: 1
+  batch_size: 1
+  gradient_accumulation: 8
+  gradient_checkpointing: true
+  log_every: 20
+
+optimizer:
+  name: adamw
+  learning_rate: 2.0e-4
+  weight_decay: 0.0
+  max_grad_norm: 1.0

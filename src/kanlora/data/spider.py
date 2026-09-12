@@ -20,6 +20,10 @@ class DatasetLayout:
     eval_file: str
     tables_file: str
     database_dir: str
+    # None — question/query лежат плоской строкой (Spider). Непустая строка —
+    # они лежат словарём {"en": ..., "ru": ...}, и это ключ, который нужно
+    # взять (PAUQ, см. kanlora/data/pauq.py).
+    text_field_language: str | None = None
 
 
 SPIDER_LAYOUT = DatasetLayout(

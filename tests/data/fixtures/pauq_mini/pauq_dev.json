@@ -1,0 +1,7 @@
+[
+  {
+    "db_id": "concert_singer",
+    "question": {"en": "What is the largest stadium?", "ru": "Какой стадион самый большой?"},
+    "query": {"en": "SELECT Name FROM stadium ORDER BY Stadium_ID DESC LIMIT 1;", "ru": "SELECT Name FROM stadium ORDER BY Stadium_ID DESC LIMIT 1;"}
+  }
+]

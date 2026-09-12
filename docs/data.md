@@ -6,15 +6,19 @@
 
 ## Зачем один загрузчик на оба набора
 
-Spider и PAUQ хранятся в одном формате JSON (список объектов
-`{db_id, question, query}` для примеров, `tables.json` формата Spider для
-схем) и различаются только именами файлов разбиений. Поэтому вся логика
-чтения и предобработки — одна функция `load_examples`, а `spider.py` и
-`pauq.py` содержат только раскладку имён файлов. Второй, независимый
-загрузчик означал бы второе место, где преобразование примера в
-`Text2SqlExample` может незаметно разойтись между наборами, — а именно это
-расхождение предобработки и обесценило бы сравнение Spider с PAUQ,
-ради которого набор PAUQ вообще привлечён.
+Spider и PAUQ хранятся в списках объектов с общим костяком (`db_id`,
+`question`, `query`) и общим форматом `tables.json`, но расходятся в двух
+местах: именах файлов разбиений и форме полей `question`/`query` — у Spider
+это плоская строка, у PAUQ (реально проверено по репозиторию
+`ai-spiderweb/pauq`) — двуязычный словарь `{"en": ..., "ru": ...}`, потому
+что PAUQ — переведённый и локализованный на русский Spider, а не независимый
+набор. Оба различия сведены в один датакласс `DatasetLayout`, а не
+разбросаны по двум читателям: логика чтения и предобработки — одна функция
+`load_examples`, а `spider.py` и `pauq.py` содержат только раскладку.
+Второй, независимый загрузчик означал бы второе место, где преобразование
+примера в `Text2SqlExample` может незаметно разойтись между наборами, — а
+именно это расхождение предобработки и обесценило бы сравнение Spider с
+PAUQ, ради которого набор PAUQ вообще привлечён.
 
 ## Сериализация схемы (`schema.py`)
 
@@ -35,9 +39,18 @@ Spider и PAUQ хранятся в одном формате JSON (список 
 
 ## Раскладки наборов (`spider.py`, `pauq.py`)
 
-`DatasetLayout(train_file: str, eval_file: str, tables_file: str, database_dir: str)`
-— замороженный датакласс с именами файлов одного набора. Объявлен в
-`spider.py`, а не в `loaders.py`: `loaders.py` использует готовые раскладки
+```python
+@dataclass(frozen=True)
+class DatasetLayout:
+    train_file: str
+    eval_file: str
+    tables_file: str
+    database_dir: str
+    text_field_language: str | None = None
+```
+
+Замороженный датакласс с раскладкой одного набора. Объявлен в `spider.py`, а
+не в `loaders.py`: `loaders.py` использует готовые раскладки
 `SPIDER_LAYOUT`/`PAUQ_LAYOUT` для реестра `LAYOUTS`, а `pauq.py` использует
 сам класс `DatasetLayout` — объявление датакласса в `loaders.py` создало бы
 цикл импортов (`loaders → spider/pauq → loaders`). Решение — держать
@@ -50,17 +63,29 @@ SPIDER_LAYOUT = DatasetLayout(
     tables_file="tables.json", database_dir="database",
 )
 PAUQ_LAYOUT = DatasetLayout(
-    train_file="pauq_xsp_train.json", eval_file="pauq_xsp_test.json",
+    train_file="pauq_train.json", eval_file="pauq_dev.json",
     tables_file="tables.json", database_dir="database",
+    text_field_language="ru",
 )
 ```
 
-Для PAUQ используется только разбиение по базам данных `pauq_xsp` — второе
-разбиение репозитория `ai-spiderweb/pauq` не подключается, чтобы не плодить
-вариантов методологии. Если фактические имена файлов после распаковки
-архива PAUQ отличаются от констант выше, их нужно поправить здесь
-синхронно с `DATASET_FILES` в `scripts/check_environment.py` (см.
-`docs/environment-check.md`).
+Оба поля раскладки PAUQ проверены напрямую по репозиторию
+`github.com/ai-spiderweb/pauq` (каталог `dataset/`), а не взяты из
+первоначального предположения плана (`pauq_xsp_train.json`/
+`pauq_xsp_test.json` — таких файлов в репозитории нет): реальные файлы —
+`dataset/pauq_train.json` (8800 примеров), `dataset/pauq_dev.json`
+(1076 примеров), `dataset/tables.json`, при распаковке в `data/pauq/` без
+префикса `dataset/`. Второе разбиение того же репозитория (`zero_return_*`)
+не подключается, чтобы не плодить вариантов методологии. Файлы баз данных в
+самом git-репозитории отсутствуют — они распространяются отдельным архивом,
+на который ссылается README репозитория.
+
+`text_field_language="ru"` — единственное отличие раскладки PAUQ от Spider
+помимо имён файлов: в PAUQ `question` и `query` (и `sql`) хранятся не
+плоской строкой, а двуязычным словарём `{"en": ..., "ru": ...}`, потому что
+PAUQ — это Spider, переведённый и локализованный на русский. `load_examples`
+использует это поле, чтобы выбрать русскую сторону (см. ниже); при
+`text_field_language is None` поле читается как плоская строка, как раньше.
 
 ## Чтение примеров (`loaders.py`)
 
@@ -77,12 +102,20 @@ PAUQ_LAYOUT = DatasetLayout(
   ошибки (`match="train_spider.json"` и подобные проверяются в тестах) —
   так опечатка в пути к данным обнаруживается сразу, а не после часа
   обучения на пустой выборке;
+- значения `question`/`query` сначала проходят через `_text_field(entry, key,
+  layout)`: если `layout.text_field_language` задан (PAUQ), берётся
+  `entry[key][layout.text_field_language]`, иначе (Spider) — сама строка
+  `entry[key]`. Это единственное место во всём читателе, которое знает про
+  двуязычную форму полей PAUQ;
 - `question` обрезается по краям (`str.strip()`), `query` нормализуется
   схлопыванием любых внутренних пробелов/переносов строк в одиночный
   пробел (`" ".join(query.split())`) — исходные файлы Spider/PAUQ не
   гарантируют единообразного форматирования SQL, а несогласованные пробелы
   в целевой строке иначе просачивались бы в маску функции потерь при
-  токенизации (задача 9).
+  токенизации (задача 9). Схлопывание пробелов заодно не трогает точку с
+  запятой на конце запроса PAUQ (`"...LIMIT 1;"`) — она остаётся в целевой
+  строке, но не мешает ни официальному парсеру Spider (токенизатор явно
+  пропускает `;`), ни `sqlite3.execute` (терпит один завершающий `;`).
 
 `load_dataset_schemas(root: Path, layout: DatasetLayout) -> dict[str, DatabaseSchema]`
 — тонкая обёртка над `schema.load_schemas(root / layout.tables_file)`;
@@ -138,9 +171,13 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
   (`test_every_example_has_a_schema`) — пример без схемы дал бы пустой
   промпт и тихо испортил бы метрику ниже по пайплайну.
 - `SPIDER_LAYOUT` и `PAUQ_LAYOUT` — раскладки одного типа `DatasetLayout`,
-  различающиеся только именами файлов, оба зарегистрированы в `LAYOUTS` под
-  своими именами (`test_layouts_are_registered_under_dataset_names`,
+  оба зарегистрированы в `LAYOUTS` под своими именами
+  (`test_layouts_are_registered_under_dataset_names`,
   `test_layouts_differ_only_in_file_names`).
+- `load_examples` с `PAUQ_LAYOUT` берёт русскую сторону двуязычных полей
+  `question`/`query`, а не английский оригинал Spider, из которого PAUQ
+  выведен (`test_pauq_examples_read_the_russian_side_of_bilingual_fields`,
+  `test_pauq_eval_split_is_read`).
 - `subsample` детерминирована по `seed`
   (`test_subsample_is_reproducible`), разные `seed` дают разные подвыборки
   (`test_subsample_does_not_depend_on_the_training_seed`), а запрошенный

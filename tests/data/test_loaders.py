@@ -23,6 +23,7 @@ from kanlora.data.pauq import PAUQ_LAYOUT
 from kanlora.data.spider import SPIDER_LAYOUT
 
 ROOT = Path(__file__).parent / "fixtures" / "spider_mini"
+PAUQ_ROOT = Path(__file__).parent / "fixtures" / "pauq_mini"
 
 
 def test_train_split_is_read(tmp_path: Path) -> None:
@@ -97,3 +98,24 @@ def test_subsample_does_not_depend_on_the_training_seed() -> None:
 def test_subsample_keeps_everything_when_size_exceeds_the_set() -> None:
     examples = load_examples(ROOT, SPIDER_LAYOUT, "train")
     assert subsample(examples, 100, seed=0) == examples
+
+
+def test_pauq_examples_read_the_russian_side_of_bilingual_fields() -> None:
+    """PAUQ хранит question/query как {"en": ..., "ru": ...}, а не плоской строкой.
+
+    Проект адаптирует модель под русскоязычный текст-в-SQL, поэтому читатель
+    обязан брать русскую сторону, а не английский оригинал Spider, из которого
+    PAUQ выведен.
+    """
+    examples = load_examples(PAUQ_ROOT, PAUQ_LAYOUT, "train")
+    assert examples[0] == Text2SqlExample(
+        db_id="concert_singer",
+        question="Сколько всего певцов?",
+        query="SELECT count(*) FROM singer;",
+    )
+
+
+def test_pauq_eval_split_is_read() -> None:
+    examples = load_examples(PAUQ_ROOT, PAUQ_LAYOUT, "eval")
+    assert len(examples) == 1
+    assert examples[0].question == "Какой стадион самый большой?"

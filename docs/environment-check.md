@@ -67,6 +67,23 @@ python scripts/check_environment.py [--data-root data]
 нужна собственная реализация — на момент проверки (2026-09-09, torch
 2.14.0) она не нужна, Muon есть в `torch.optim`.
 
+### `check_nltk_punkt() -> Check`
+
+Проверяет `nltk.data.find("tokenizers/punkt_tab")`. Официальный сценарий
+оценки Spider (`third_party/spider_eval/process_sql.py`, см.
+`docs/exact_match.md`) токенизирует сам SQL-запрос через
+`nltk.word_tokenize`, которому нужны скачанные данные `punkt_tab`; без
+проверки их отсутствие обнаружилось бы `LookupError` посреди оценки Exact
+Match, то есть после уже состоявшегося обучения, а не перед его началом.
+При отсутствии сообщает команду для скачивания: `python -m nltk.downloader
+punkt_tab`.
+
+Добавлена вместе с `nltk` в `pyproject.toml`: раньше зависимость не была
+объявлена явно и молча работала только потому, что тесты запускались
+интерпретатором, где `nltk` и его данные уже были установлены — на честно
+изолированном окружении (`uv sync` в чистый `.venv`) это привело бы к
+`ModuleNotFoundError`.
+
 ### `check_dataset(name: str, root: Path) -> list[Check]`
 
 Для `name` из `{"spider", "pauq"}` проверяет:
@@ -86,8 +103,8 @@ data/spider/
   database/<db_id>/<db_id>.sqlite
 
 data/pauq/
-  pauq_xsp_train.json
-  pauq_xsp_test.json
+  pauq_train.json
+  pauq_dev.json
   tables.json
   database/<db_id>/<db_id>.sqlite
 ```
@@ -97,13 +114,17 @@ data/pauq/
 ```python
 DATASET_FILES = {
     "spider": ("train_spider.json", "dev.json", "tables.json"),
-    "pauq": ("pauq_xsp_train.json", "pauq_xsp_test.json", "tables.json"),
+    "pauq": ("pauq_train.json", "pauq_dev.json", "tables.json"),
 }
 ```
 
-Для PAUQ используется только разбиение `pauq_xsp`; если фактические имена
-файлов после распаковки архива будут отличаться, константу нужно поправить
-здесь синхронно с загрузчиком `kanlora.data.pauq` (см. `docs/data.md`).
+Имена файлов PAUQ проверены напрямую по репозиторию
+`github.com/ai-spiderweb/pauq` (каталог `dataset/`): реальные файлы —
+`pauq_train.json`/`pauq_dev.json`, без префикса `pauq_xsp_`, который
+предполагался в первоначальном плане. Раскладка синхронизирована с
+загрузчиком `kanlora.data.pauq` (см. `docs/data.md`), включая
+`text_field_language="ru"` — то, что `check_environment.py` не проверяет
+(его интересует только наличие файлов, а не форма полей внутри них).
 
 ## Известные ограничения
 

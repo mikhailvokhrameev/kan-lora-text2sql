@@ -150,3 +150,17 @@ def test_frozen_input_scale_is_excluded_from_training(base: nn.Linear) -> None:
     assert adapter.kan.input_scale.requires_grad is False
     assert torch.allclose(adapter.kan.input_scale, torch.ones_like(adapter.kan.input_scale))
     assert adapter.analytic_parameter_count() == adapter.trainable_parameter_count()
+
+
+def test_observed_range_expands_after_forward_pass(adapter: KANLoRALinear) -> None:
+    """Мера нелинейности обязана мерить там, куда реально попадают активации."""
+    assert adapter.observed_range() == (float("inf"), float("-inf"))
+
+    adapter(small_input())
+    first_lo, first_hi = adapter.observed_range()
+    assert first_lo < first_hi
+
+    adapter(10.0 * small_input())
+    second_lo, second_hi = adapter.observed_range()
+    assert second_lo <= first_lo
+    assert second_hi >= first_hi

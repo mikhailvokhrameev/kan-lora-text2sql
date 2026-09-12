@@ -1,9 +1,13 @@
 """Чтение наборов Spider и PAUQ.
 
-Оба набора хранятся в одном формате JSON и различаются только именами файлов,
-поэтому читатель один. Второй читатель означал бы второе место, где
-предобработка способна незаметно разойтись между наборами, а сравнение
-Spider с PAUQ строится ровно на том, что предобработка у них одна.
+Оба набора читаются одним кодом. Различий между их файлами два, и оба сведены
+в `DatasetLayout` (`kanlora.data.spider`), а не разбросаны по двум читателям:
+имена файлов (`train_file`/`eval_file`/`tables_file`) и форма полей
+`question`/`query` — плоская строка у Spider, двуязычный словарь
+`{"en": ..., "ru": ...}` у PAUQ (`text_field_language`). Второй читатель
+означал бы второе место, где предобработка способна незаметно разойтись
+между наборами, а сравнение Spider с PAUQ строится ровно на том, что
+предобработка у них одна.
 """
 
 from __future__ import annotations
@@ -42,6 +46,13 @@ def _split_file(layout: DatasetLayout, split: Split) -> str:
     return {"train": layout.train_file, "eval": layout.eval_file}[split]
 
 
+def _text_field(entry: dict, key: str, layout: DatasetLayout) -> str:
+    """Достаёт `question`/`query` независимо от того, плоская это строка или
+    двуязычный словарь `{"en": ..., "ru": ...}` (PAUQ, см. `data/pauq.py`)."""
+    value = entry[key]
+    return value[layout.text_field_language] if layout.text_field_language else value
+
+
 def load_examples(root: Path, layout: DatasetLayout, split: Split) -> list[Text2SqlExample]:
     path = Path(root) / _split_file(layout, split)
     if not path.is_file():
@@ -51,8 +62,8 @@ def load_examples(root: Path, layout: DatasetLayout, split: Split) -> list[Text2
     return [
         Text2SqlExample(
             db_id=entry["db_id"],
-            question=entry["question"].strip(),
-            query=" ".join(entry["query"].split()),
+            question=_text_field(entry, "question", layout).strip(),
+            query=" ".join(_text_field(entry, "query", layout).split()),
         )
         for entry in entries
     ]

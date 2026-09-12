@@ -10,3 +10,5 @@ results/figures/
 CLAUDE.md
 docs/superpowers/
 .claude
+.vscode
+.DS_Store

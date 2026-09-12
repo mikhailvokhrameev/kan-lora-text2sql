@@ -1,0 +1,12 @@
+[
+  {
+    "db_id": "concert_singer",
+    "question": {"en": "How many singers are there?", "ru": "Сколько всего певцов?"},
+    "query": {"en": "SELECT count(*) FROM singer;", "ru": "SELECT count(*) FROM singer;"}
+  },
+  {
+    "db_id": "pets_1",
+    "question": {"en": "How many students?", "ru": "Сколько студентов?"},
+    "query": {"en": "SELECT count(*) FROM Student;", "ru": "SELECT count(*) FROM Student;"}
+  }
+]

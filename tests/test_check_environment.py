@@ -35,6 +35,26 @@ def test_muon_check_matches_torch_optim(module) -> None:
     assert check.ok is hasattr(torch.optim, "Muon")
 
 
+def test_nltk_punkt_check_matches_actual_availability(module) -> None:
+    """process_sql.py (Spider eval) вызывает nltk.word_tokenize -> нужен punkt_tab.
+
+    Раньше эта зависимость не была в pyproject.toml вообще и молча работала
+    только потому, что тесты случайно запускались интерпретатором с уже
+    установленным nltk и скачанными данными — на чистом окружении (в том
+    числе на машине обучения) Exact Match упал бы `LookupError` посреди
+    оценки, а не на старте.
+    """
+    import nltk
+
+    check = module.check_nltk_punkt()
+    try:
+        nltk.data.find("tokenizers/punkt_tab")
+        available = True
+    except LookupError:
+        available = False
+    assert check.ok is available
+
+
 def test_missing_dataset_reports_not_ok_without_raising(module, tmp_path: Path) -> None:
     checks = module.check_dataset("spider", tmp_path / "nowhere")
     assert checks, "проверка набора обязана вернуть хотя бы один пункт"
