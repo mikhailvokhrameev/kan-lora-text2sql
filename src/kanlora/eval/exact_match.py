@@ -14,9 +14,10 @@ Exact Match в Spider — покомпонентное сравнение раз
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
+
+from kanlora.data.schema import DatabaseSchema, load_schemas
 
 __all__ = ["exact_match", "exact_match_by_hardness"]
 
@@ -31,24 +32,25 @@ if str(_SPIDER_EVAL) not in sys.path:
 HARDNESS_LEVELS = ("easy", "medium", "hard", "extra", "all")
 
 
-def _schema_dict_from_entry(entry: dict) -> dict[str, list[str]]:
-    """Строит `{таблица: [столбцы]}` из записи `tables.json`.
+def _schema_dict_from_entry(schema: DatabaseSchema) -> dict[str, list[str]]:
+    """Приводит `DatabaseSchema` к `{таблица: [столбцы]}`.
 
     Повторяет формат официальной `process_sql.get_schema`, которая читает ту
-    же информацию напрямую из `.sqlite`-файла: имена в нижнем регистре,
-    столбец `*` (индекс таблицы -1) отбрасывается.
+    же информацию напрямую из `.sqlite`-файла: имена в нижнем регистре.
+    Столбец `*` уже отброшен на уровне `kanlora.data.schema.load_schemas`,
+    здесь остаётся только привести регистр под ожидания вендоренного кода.
     """
-    table_names = entry["table_names_original"]
-    schema: dict[str, list[str]] = {name.lower(): [] for name in table_names}
-    for table_index, column_name in entry["column_names_original"]:
-        if table_index >= 0:
-            schema[table_names[table_index].lower()].append(column_name.lower())
-    return schema
+    return {
+        table.name.lower(): [column.lower() for column in table.columns]
+        for table in schema.tables
+    }
 
 
 def _load_schemas(tables_json: Path) -> dict[str, dict[str, list[str]]]:
-    entries = json.loads(Path(tables_json).read_text(encoding="utf-8"))
-    return {entry["db_id"]: _schema_dict_from_entry(entry) for entry in entries}
+    return {
+        db_id: _schema_dict_from_entry(schema)
+        for db_id, schema in load_schemas(tables_json).items()
+    }
 
 
 def exact_match_by_hardness(
