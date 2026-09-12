@@ -93,7 +93,8 @@ def train(model, dataset, collator, optimizer_config, train_config, device) -> T
 1. `set_seed(train_config.seed)`, модель переводится на `device` и в режим
    `train()`.
 2. При `train_config.gradient_checkpointing=True` включается
-   `model.gradient_checkpointing_enable()` и `model.config.use_cache = False`
+   `model.gradient_checkpointing_enable()`, затем явно
+   `model.enable_input_require_grads()` и `model.config.use_cache = False`
    — чекпоинтинг несовместим с кешем ключей/значений при обучении.
 3. `DataLoader` с перемешиванием, детерминированным по тому же `seed`, и
    `collate_fn=collator`.
@@ -153,8 +154,54 @@ KAN-LoRA, при любом ранге адаптера и любой разум
 имеют отношения к гиперпараметрам реальных экспериментов (`2.0e-4`,
 зафиксированным в `docs/README.md` и плане).
 
+## `model.enable_input_require_grads()` при чекпоинтинге
+
+При `train_config.gradient_checkpointing=True` рядом с
+`model.gradient_checkpointing_enable()` явно вызывается
+`model.enable_input_require_grads()` (`train/loop.py`). Причина в том, что
+основа модели заморожена, а входные эмбеддинги — первый слой сети — сами по
+себе не требуют градиента; без `enable_input_require_grads()`
+`torch.utils.checkpoint` может не построить граф автоматического
+дифференцирования для checkpoint-сегмента, из-за чего градиент не доходит от
+функции потерь до весов адаптера внутри этого сегмента.
+
+Этот вызов — **защита на случай отката/понижения версии `transformers`, а не
+исправление бага, воспроизводимого в установленном в репозитории окружении.**
+Это подтверждено прямой проверкой (не только чтением кода):
+
+- На `transformers==5.17.0`, установленной в `.venv` этого репозитория,
+  `PreTrainedModel.gradient_checkpointing_enable()` уже сама вызывает
+  `self.enable_input_require_grads()` безусловно для всех causal LM
+  (`self.main_input_name == "input_ids"`). На этой версии обучение адаптера с
+  `gradient_checkpointing=True` уже работает корректно даже без явного вызова
+  в `train()` — регрессионный тест
+  `test_gradient_checkpointing_preserves_adapter_gradient`
+  (`tests/train/test_loop.py`) проходит и без патча.
+- На нижней границе версии, зафиксированной в `pyproject.toml`
+  (`transformers==4.46.0`), тот же код вызывает
+  `self.enable_input_require_grads()` только когда
+  `self._hf_peft_config_loaded` — то есть только при загрузке адаптеров через
+  библиотеку HF PEFT (`get_peft_model`). Адаптеры в этом проекте (LoRA, DoRA,
+  KAN-LoRA — `src/kanlora/adapters/`) внедряются собственным кодом
+  (`inject_adapters`), а не через HF PEFT, поэтому `_hf_peft_config_loaded`
+  никогда не выставляется, и на `transformers==4.46.0` без явного вызова
+  обучение с `gradient_checkpointing=True` действительно падает: проверено
+  прямым запуском обучения тестовой модели с `LoRA`-адаптером в изолированном
+  окружении с `transformers==4.46.0` — без патча `backward()` кидает
+  `RuntimeError: element 0 of tensors does not require grad and does not have
+  a grad_fn`; с явным `model.enable_input_require_grads()` градиент доходит до
+  `lora_b`, и обучение проходит как обычно.
+
+Итог: баг реален на нижней границе поддерживаемых версий `transformers`, но
+уже не воспроизводится на версии, установленной в текущем окружении, — апстрим
+перестал требовать HF PEFT для этого условия. Явный вызов оставлен, чтобы
+поведение не зависело от конкретной установленной версии зависимости.
+
 ## Проверенные инварианты
 
+- При `gradient_checkpointing=True` градиент доходит до адаптера так же, как и
+  без чекпоинтинга: `lora_b` меняется, функция потерь падает
+  (`test_gradient_checkpointing_preserves_adapter_gradient`).
 - Все три метода адаптации переобучивают двадцать примеров почти до нулевой
   функции потерь (`test_overfits_twenty_examples`, с размороженными нормой и
   эмбеддингами — см. выше).
