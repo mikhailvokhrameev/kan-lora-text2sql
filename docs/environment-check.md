@@ -86,8 +86,8 @@ data/spider/
   database/<db_id>/<db_id>.sqlite
 
 data/pauq/
-  pauq_xsp_train.json
-  pauq_xsp_test.json
+  pauq_train.json
+  pauq_dev.json
   tables.json
   database/<db_id>/<db_id>.sqlite
 ```
@@ -97,13 +97,17 @@ data/pauq/
 ```python
 DATASET_FILES = {
     "spider": ("train_spider.json", "dev.json", "tables.json"),
-    "pauq": ("pauq_xsp_train.json", "pauq_xsp_test.json", "tables.json"),
+    "pauq": ("pauq_train.json", "pauq_dev.json", "tables.json"),
 }
 ```
 
-Для PAUQ используется только разбиение `pauq_xsp`; если фактические имена
-файлов после распаковки архива будут отличаться, константу нужно поправить
-здесь синхронно с загрузчиком `kanlora.data.pauq` (см. `docs/data.md`).
+Имена файлов PAUQ проверены напрямую по репозиторию
+`github.com/ai-spiderweb/pauq` (каталог `dataset/`): реальные файлы —
+`pauq_train.json`/`pauq_dev.json`, без префикса `pauq_xsp_`, который
+предполагался в первоначальном плане. Раскладка синхронизирована с
+загрузчиком `kanlora.data.pauq` (см. `docs/data.md`), включая
+`text_field_language="ru"` — то, что `check_environment.py` не проверяет
+(его интересует только наличие файлов, а не форма полей внутри них).
 
 ## Известные ограничения
 
