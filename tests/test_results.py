@@ -64,6 +64,15 @@ def test_absent_execution_accuracy_is_null_not_zero() -> None:
     assert card["metrics"]["execution_accuracy"] is None
 
 
+def test_card_carries_step_losses(card: dict, tmp_path: Path) -> None:
+    """`step_losses` — единственная запись пошагового спуска, без неё карточка
+    не даёт различить гладкое обучение от скачков внутри эпохи."""
+    assert card["step_losses"] == [2.0, 1.0]
+
+    path = write_result_card(card, tmp_path)
+    assert json.loads(path.read_text(encoding="utf-8"))["step_losses"] == [2.0, 1.0]
+
+
 def test_written_card_is_valid_json_named_by_run(card: dict, tmp_path: Path) -> None:
     path = write_result_card(card, tmp_path)
 
