@@ -19,7 +19,6 @@ import torch
 from torch.utils.data import DataLoader
 
 from kanlora.adapters.inject import adapter_modules
-from kanlora.adapters.kan_lora import KANLoRALinear
 from kanlora.train.memory import PeakMemoryTracker
 from kanlora.train.optimizers import OptimizerConfig, build_optimizer
 
@@ -57,11 +56,7 @@ def set_seed(seed: int) -> None:
 
 
 def _mean_fraction_inside_grid(model: torch.nn.Module) -> float | None:
-    values = [
-        module.last_fraction_inside_grid()
-        for _, module in adapter_modules(model)
-        if isinstance(module, KANLoRALinear)
-    ]
+    values = [module.last_fraction_inside_grid() for _, module in adapter_modules(model)]
     present = [value for value in values if value is not None]
     return sum(present) / len(present) if present else None
 

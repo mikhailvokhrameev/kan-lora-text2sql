@@ -90,6 +90,16 @@ class AdapterLinear(nn.Module, ABC):
     def trainable_parameter_count(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
+    def last_fraction_inside_grid(self) -> float | None:
+        """Доля активаций внутри сетки сплайна на последнем проходе.
+
+        По умолчанию `None` — статистика есть только у KAN-LoRA. Метод живёт
+        здесь, а не проверяется через isinstance в цикле обучения, чтобы
+        `loop.py` оставался общим для всех адаптеров и не знал про KAN-LoRA
+        напрямую.
+        """
+        return None
+
     def merge(self) -> nn.Linear:
         """Возвращает обычный nn.Linear с поглощённой поправкой."""
         raise NotImplementedError(
