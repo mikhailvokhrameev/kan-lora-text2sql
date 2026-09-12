@@ -67,8 +67,10 @@ class TrainReport:
 ```
 
 `fraction_inside_grid` — по одному значению на эпоху, только когда среди
-адаптеров модели есть хотя бы один `KANLoRALinear`; для LoRA и DoRA список
-остаётся пустым (`[]`). `optimizer_coverage` — результат
+адаптеров модели есть хотя бы один, у которого `last_fraction_inside_grid()`
+возвращает не `None`; для LoRA и DoRA (у которых этот метод не переопределён и
+наследуется от `AdapterLinear`, всегда возвращая `None`) список остаётся
+пустым (`[]`). `optimizer_coverage` — результат
 `OptimizerBundle.coverage()`, показывает, сколько параметров реально досталось
 `Muon`, а сколько — запасному `AdamW` (см. `docs/optimizers.md`).
 
@@ -112,8 +114,13 @@ def train(model, dataset, collator, optimizer_config, train_config, device) -> T
    печати по итогам эпохи (см. ниже) и независимо от того, кратен ли шаг
    `gradient_accumulation`.
 6. После каждой эпохи — средняя функция потерь по эпохе, средняя доля
-   активаций в сетке по всем `KANLoRALinear` (`_mean_fraction_inside_grid`,
-   если такие адаптеры есть) и печать этих значений на русском.
+   активаций в сетке (`_mean_fraction_inside_grid`) и печать этих значений на
+   русском. `_mean_fraction_inside_grid` вызывает `last_fraction_inside_grid()`
+   полиморфно на каждом адаптере из `adapter_modules(model)`, без проверки
+   типа: усредняются только значения, отличные от `None` (их дают только
+   `KANLoRALinear`; у LoRA и DoRA — базовая реализация из `AdapterLinear`,
+   всегда `None`). Цикл обучения благодаря этому не знает про конкретные
+   классы адаптеров.
 7. По завершении — время выполнения (`time.perf_counter`) и пиковая
    видеопамять.
 

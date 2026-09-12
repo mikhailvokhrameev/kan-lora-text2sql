@@ -74,6 +74,12 @@ self.scaling = config.alpha / config.rank
   веса основы в счётчик не попадают.
 - `merge() -> nn.Linear` — по умолчанию бросает `NotImplementedError`;
   переопределяется теми методами, у которых `can_merge is True`.
+- `last_fraction_inside_grid() -> float | None` — по умолчанию `None`.
+  Переопределён только в `KANLoRALinear`, где возвращает долю активаций
+  сплайна, попавших в сетку на последнем проходе. Существует на уровне
+  интерфейса, а не проверяется через `isinstance(module, KANLoRALinear)` в
+  цикле обучения, чтобы `train/loop.py` не знал о конкретных классах
+  адаптеров и оставался общим для LoRA, DoRA и KAN-LoRA.
 - `extra_repr()` — читаемое представление для `print(model)`.
 
 ### `freeze(module: nn.Module) -> None`
