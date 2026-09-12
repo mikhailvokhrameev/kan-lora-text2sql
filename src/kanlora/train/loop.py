@@ -19,7 +19,6 @@ import torch
 from torch.utils.data import DataLoader
 
 from kanlora.adapters.inject import adapter_modules
-from kanlora.adapters.kan_lora import KANLoRALinear
 from kanlora.train.memory import PeakMemoryTracker
 from kanlora.train.optimizers import OptimizerConfig, build_optimizer
 
@@ -57,11 +56,7 @@ def set_seed(seed: int) -> None:
 
 
 def _mean_fraction_inside_grid(model: torch.nn.Module) -> float | None:
-    values = [
-        module.last_fraction_inside_grid()
-        for _, module in adapter_modules(model)
-        if isinstance(module, KANLoRALinear)
-    ]
+    values = [module.last_fraction_inside_grid() for _, module in adapter_modules(model)]
     present = [value for value in values if value is not None]
     return sum(present) / len(present) if present else None
 
@@ -80,6 +75,11 @@ def train(
 
     if train_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
+        # Явно, а не полагаясь на автоматику transformers: на пришпиленной нижней
+        # границе версии (4.46) она включается только под HF PEFT, а этот проект
+        # свои адаптеры через PEFT не заводит — без вызова градиент к адаптерам
+        # не доходит через чекпоинтинг, если вход не требует grad.
+        model.enable_input_require_grads()
         model.config.use_cache = False
 
     loader = DataLoader(
@@ -105,9 +105,13 @@ def train(
             loss = model(**batch).loss
             (loss / train_config.gradient_accumulation).backward()
 
-            epoch_total += loss.item()
+            step_loss = loss.item()
+            epoch_total += step_loss
             epoch_batches += 1
-            report.step_losses.append(loss.item())
+            report.step_losses.append(step_loss)
+
+            if index % train_config.log_every == 0:
+                print(f"шаг {index}/{len(loader)} (эпоха {epoch + 1}): функция потерь {step_loss:.4f}")
 
             if index % train_config.gradient_accumulation == 0 or index == len(loader):
                 bundle.clip_grad_norm_(optimizer_config.max_grad_norm)

@@ -152,6 +152,20 @@ def test_frozen_input_scale_is_excluded_from_training(base: nn.Linear) -> None:
     assert adapter.analytic_parameter_count() == adapter.trainable_parameter_count()
 
 
+def test_fraction_inside_grid_stays_a_tensor_between_forward_passes(
+    adapter: KANLoRALinear,
+) -> None:
+    """`.item()` синхронизирует CPU с GPU — на каждый forward это лишний барьер.
+
+    `delta()` обязана хранить необработанный тензор; `.item()` — привилегия
+    `last_fraction_inside_grid()`, вызываемого раз в эпоху из цикла обучения,
+    а не самого forward-прохода.
+    """
+    adapter(small_input())
+    assert isinstance(adapter._fraction_inside_grid, torch.Tensor)
+    assert isinstance(adapter.last_fraction_inside_grid(), float)
+
+
 def test_observed_range_expands_after_forward_pass(adapter: KANLoRALinear) -> None:
     """Мера нелинейности обязана мерить там, куда реально попадают активации."""
     assert adapter.observed_range() == (float("inf"), float("-inf"))

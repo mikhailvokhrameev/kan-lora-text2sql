@@ -63,6 +63,7 @@ def build_result_card(
         "total_parameters": injection["total_parameters"],
         "adapted_modules": len(injection["replaced"]),
         "optimizer_coverage": train_report.optimizer_coverage,
+        "step_losses": train_report.step_losses,
         "epoch_losses": train_report.epoch_losses,
         "fraction_inside_grid": train_report.fraction_inside_grid,
         "spline_stats": spline_stats,

@@ -80,6 +80,40 @@ def test_overfits_twenty_examples(tiny_causal_lm, method: str) -> None:
 
 
 @pytest.mark.slow
+def test_gradient_checkpointing_preserves_adapter_gradient(tiny_causal_lm) -> None:
+    """С включённым gradient_checkpointing адаптер обязан обучаться так же, как без него.
+
+    Регрессионная защита для входных эмбеддингов без requires_grad=True при
+    заморожённой основе: без явного enable_input_require_grads() градиент до
+    LoRA может не дойти при чекпоинтинге (см. docs/train-loop.md). В связке с
+    transformers, установленной в этом окружении, баг уже не воспроизводится
+    (апстрим сам вызывает enable_input_require_grads() для causal LM), поэтому
+    тест служит защитой от отката/понижения версии transformers, а не тестом,
+    падающим прямо сейчас.
+    """
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+    lora_b_name = next(
+        name for name, parameter in tiny_causal_lm.named_parameters()
+        if name.endswith("lora_b") and parameter.requires_grad
+    )
+    before = dict(tiny_causal_lm.named_parameters())[lora_b_name].detach().clone()
+
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
+        train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=1,
+                                 gradient_checkpointing=True),
+        device=DEVICE,
+    )
+
+    after = dict(tiny_causal_lm.named_parameters())[lora_b_name]
+    assert not torch.equal(before, after), "lora_b не изменился при gradient_checkpointing=True"
+    assert report.epoch_losses[-1] < report.epoch_losses[0]
+
+
+@pytest.mark.slow
 def test_only_adapter_parameters_change(tiny_causal_lm) -> None:
     """Сверка того, что обучаются ровно адаптеры: основа обязана остаться прежней."""
     inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
@@ -166,6 +200,32 @@ def test_gradient_accumulation_matches_the_larger_batch(tiny_causal_lm) -> None:
         epochs=1, batch_size=2, gradient_accumulation=2, gradient_checkpointing=False), **common)
 
     assert big.epoch_losses[0] == pytest.approx(split.epoch_losses[0], rel=1e-3)
+
+
+@pytest.mark.slow
+def test_logs_loss_every_log_every_steps(tiny_causal_lm, capsys) -> None:
+    """Построчный лог должен печататься каждые log_every шагов, а не только за эпоху."""
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+
+    train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
+        train_config=TrainConfig(
+            epochs=1, batch_size=4, gradient_accumulation=1,
+            gradient_checkpointing=False, log_every=2,
+        ),
+        device=DEVICE,
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    step_lines = [line for line in lines if line.startswith("шаг ")]
+
+    # 20 примеров, batch_size=4 -> 5 шагов за эпоху; log_every=2 -> шаги 2 и 4.
+    assert len(step_lines) == 2
+    assert step_lines[0].startswith("шаг 2/5")
+    assert step_lines[1].startswith("шаг 4/5")
 
 
 @pytest.mark.slow

@@ -82,12 +82,19 @@ from process_sql import Schema, get_sql
 `evaluate()` вместо этого строит схему подключением к `.sqlite`
 (`Schema(get_schema(db))`), а `.sqlite`-путей у обёртки нет по интерфейсу.
 
-`_schema_dict_from_entry` в обёртке строит тот же по форме словарь
+`_load_schemas` строит тот же по форме словарь
 (`{имя_таблицы_в_нижнем_регистре: [имена_столбцов_в_нижнем_регистре]}`),
-что и `get_schema`, но напрямую из полей `table_names_original` /
-`column_names_original` записи `tables.json` — то есть даёт `Schema`
-вендоренного кода вход в точности той формы, которую она ожидает,
-независимо от того, есть ли на диске сам файл базы.
+что и `get_schema`, — но не разбирает `tables.json` заново, а вызывает
+`kanlora.data.schema.load_schemas` (`docs/data.md`) и приводит уже
+готовый `DatabaseSchema` к нижнему регистру через `_schema_dict_from_entry`.
+До этого обёртка сама читала поля `table_names_original` /
+`column_names_original` записи `tables.json` — тот же разбор, что и в
+`data/schema.py`, но независимо реализованный, с риском незаметно
+разойтись при изменении одного из двух мест. Отбрасывание служебного
+столбца `*` (индекс таблицы -1) теперь происходит только внутри
+`load_schemas`; `exact_match.py` про этот индекс больше не знает — он
+получает уже отфильтрованный `DatabaseSchema.tables` и только меняет
+регистр имён под ожидания `Schema` из `process_sql.py`.
 
 ## Учёт внешних ключей (`rebuild_sql_col`)
 
@@ -157,6 +164,12 @@ def exact_match(
 - Разбивка по сложности всегда содержит все пять уровней официального
   сценария: `easy`, `medium`, `hard`, `extra`, `all`
   (`test_hardness_breakdown_covers_all_levels`).
+- Словарь схемы, построенный из `data.schema.load_schemas`, побайтово
+  совпадает с тем, что раньше строил ручной разбор `tables.json` внутри
+  этого модуля — нижний регистр имён, отброшенный столбец `*`
+  (`test_schema_dict_matches_hand_built_lowercase_format`). Регрессия на
+  переход к общему парсеру из `data/schema.py` (задача 10 плана
+  code-review-fixes).
 
 ## Смежные модули
 

@@ -74,12 +74,30 @@ self.scaling = config.alpha / config.rank
   веса основы в счётчик не попадают.
 - `merge() -> nn.Linear` — по умолчанию бросает `NotImplementedError`;
   переопределяется теми методами, у которых `can_merge is True`.
+- `last_fraction_inside_grid() -> float | None` — по умолчанию `None`.
+  Переопределён только в `KANLoRALinear`, где возвращает долю активаций
+  сплайна, попавших в сетку на последнем проходе. Существует на уровне
+  интерфейса, а не проверяется через `isinstance(module, KANLoRALinear)` в
+  цикле обучения, чтобы `train/loop.py` не знал о конкретных классах
+  адаптеров и оставался общим для LoRA, DoRA и KAN-LoRA.
 - `extra_repr()` — читаемое представление для `print(model)`.
 
 ### `freeze(module: nn.Module) -> None`
 
 Снимает `requires_grad` со всех параметров модуля. Используется в
 конструкторе `AdapterLinear` для заморозки `self.base`.
+
+### `_build_merged_linear(base: nn.Linear, weight: Tensor) -> nn.Linear`
+
+Общая часть `merge()` у LoRA и DoRA: создаёт `nn.Linear` той же формы,
+`dtype` и `device`, что и `base`, копирует в него переданный `weight` и
+`bias` из `base` (если он есть, иначе слитый слой остаётся без `bias`).
+У LoRA и DoRA расходится только выражение, которым получается итоговый
+`weight` (`base.weight + scaling * B A` против `effective_weight()`) —
+само построение `nn.Linear` и копирование `bias` было продублировано и
+вынесено в этот приватный хелпер модуля `base.py`, чтобы оба места не
+могли разойтись случайно (например, один забыл бы скопировать `bias`).
+Каждый вызывающий метод по-прежнему не трогает исходный `self.base`.
 
 ## B-сплайновый базис (`spline.py`)
 
@@ -161,7 +179,7 @@ B-сплайновый базис определён на конечной се�
 ### `forward(x) -> Tensor`
 
 ```python
-scaled = x / self.input_scale
+scaled = x / self._safe_input_scale_divisor()
 basis = bspline_basis(scaled, self.knots, self.spline_order)
 spline = einsum("...ib,oib->...oi", basis, self.spline_coefficients)
 base = silu(scaled).unsqueeze(-2) * self.base_weight
@@ -169,14 +187,49 @@ edges = base + self.spline_scale * spline
 return (edges * self.input_scale).sum(dim=-1)
 ```
 
+Обратите внимание: делителем служит `_safe_input_scale_divisor()`, а
+обратное умножение на выходе (`edges * self.input_scale`) использует сам
+параметр без изменений — см. ниже.
+
+### Пол на модуль `input_scale` (`_safe_input_scale_divisor`)
+
+`input_scale` — необученно ограниченный параметр: ничто не мешает
+градиентному спуску увести его модуль к нулю. Поскольку `input_scale`
+служит делителем в `forward` и `fraction_inside_grid`, достаточно
+маленький модуль переполняет `x / input_scale` в `inf`; далее в рекурсии
+Кокса — де Бура (`bspline_basis`) встречается `inf * 0`, что даёт `nan`.
+Это происходит для конкретного входного канала, но `forward` суммирует
+вклад всех каналов в выход (`.sum(dim=-1)`), поэтому один заражённый
+канал превращает в `nan` весь выходной вектор, а не только свою
+компоненту.
+
+Защита — отдельный метод:
+
+```python
+def _safe_input_scale_divisor(self) -> torch.Tensor:
+    magnitude = self.input_scale.abs().clamp(min=_MIN_INPUT_SCALE_MAGNITUDE)
+    return torch.copysign(magnitude, self.input_scale)
+```
+
+где `_MIN_INPUT_SCALE_MAGNITUDE = 1e-4`. Знак сохраняется через
+`copysign`, чтобы не менять направление растяжения сетки при отрицательном
+`input_scale`. Метод используется только как делитель — сам параметр
+`input_scale` (и обратное умножение на нём в `forward`) не меняется,
+поэтому тождественная инициализация (`input_scale == 1.0`, что заведомо
+больше порога) численно не затрагивается: пол начинает действовать только
+при выученных значениях с модулем меньше `1e-4`, а не на старте обучения.
+Формулировка KAN-слоя (базис, ранг, схема активаций) этим изменением не
+затронута — правка исключительно численная.
+
 ### `fraction_inside_grid(x) -> Tensor`
 
 Диагностика вырождения: доля элементов `x / input_scale`, попавших в
-`grid_range`. Значение, ощутимо меньшее 1.0, означает, что заметная часть
-входов не задействует сплайн-часть слоя (базис вне сетки равен нулю) —
-это самая частая скрытая ошибка в реализациях KAN-адаптеров, поэтому
-величина рассчитана как отдельный метод, снимаемый на каждом проходе, а
-не отдельным диагностическим прогоном.
+`grid_range` (с тем же полом на делитель, что и в `forward`). Значение,
+ощутимо меньшее 1.0, означает, что заметная часть входов не задействует
+сплайн-часть слоя (базис вне сетки равен нулю) — это самая частая скрытая
+ошибка в реализациях KAN-адаптеров, поэтому величина рассчитана как
+отдельный метод, снимаемый на каждом проходе, а не отдельным
+диагностическим прогоном.
 
 ### `parameter_count() -> int`
 
@@ -217,12 +270,11 @@ delta_W * x = (alpha / r) * B (A x)
   тождественно равна нулю.
 - `analytic_parameter_count() -> int` — `rank * (in_features + out_features)`.
 - `can_merge` — всегда `True`.
-- `merge() -> nn.Linear` — создаёт новый `nn.Linear` с
-  `weight = base.weight + scaling * (lora_b @ lora_a)` и копией `bias`
-  (если он есть). Исходный `self.base` не изменяется: слияние выполняется в
-  новый объект, старый остаётся пригодным для повторного использования
-  (в частности, для будущего DoRA-адаптера, который также оборачивает
-  `nn.Linear` как самостоятельную основу).
+- `merge() -> nn.Linear` — считает `weight = base.weight + scaling * (lora_b @ lora_a)`
+  и передаёт его в общий хелпер `_build_merged_linear` (см. раздел
+  `AdapterLinear` выше), который и создаёт новый `nn.Linear` с этим весом и
+  копией `bias`. Исходный `self.base` не изменяется: слияние выполняется в
+  новый объект, старый остаётся пригодным для повторного использования.
 
 Слияние (`merge`) существует потому, что LoRA — линейная поправка: после
 обучения её можно поглотить в веса и не платить дополнительной задержкой
@@ -282,9 +334,9 @@ LoRA: при `B = 0` направление `V` в точности равно `
   параметрах адаптера, поэтому после обучения `effective_weight()`
   поглощается в обычный `nn.Linear` и на инференсе не остаётся никакой
   дополнительной надстройки.
-- `merge() -> nn.Linear` — новый `nn.Linear` с
-  `weight = effective_weight()` и скопированным `bias`; исходный `base` не
-  изменяется, аналогично `LoRALinear.merge()`.
+- `merge() -> nn.Linear` — передаёт `effective_weight()` в тот же общий
+  хелпер `_build_merged_linear`, что и `LoRALinear.merge()`; исходный `base`
+  не изменяется.
 
 ### Сводимость к LoRA
 
@@ -348,10 +400,14 @@ delta_W * x = (alpha / r) * B * phi(A x)
   `B` и масштаб `scaling`. Попутно, как побочный эффект (`torch.no_grad()`),
   сохраняет `kan.fraction_inside_grid(A x)` во внутреннее поле
   `_fraction_inside_grid` — снимается на каждом проходе, а не отдельным
-  диагностическим прогоном.
+  диагностическим прогоном. Значение хранится как `torch.Tensor`, без
+  `.item()`: перевод в `float` синхронизирует CPU с GPU и на каждом
+  forward-проходе был бы лишним барьером, тогда как `last_fraction_inside_grid()`
+  ниже вызывается всего раз в эпоху из `train()`.
 - `forward(x) -> Tensor` — `self.base(x) + self.delta(x)`.
 - `last_fraction_inside_grid() -> float | None` — последнее сохранённое
-  значение; `None` до первого прямого прохода.
+  значение, переведённое в `float` через `.item()` в этом методе (а не в
+  `delta()`); `None` до первого прямого прохода.
 - `observed_range() -> tuple[float, float]` — фактический размах `A x`,
   накопленный поэлементным `min`/`max` за **все** прямые проходы с момента
   создания адаптера (буферы `observed_lo`, `observed_hi`, начальные значения
@@ -396,6 +452,11 @@ delta_W * x = (alpha / r) * B * phi(A x)
   (`test_merged_linear_reproduces_adapter_output` для LoRA и DoRA,
   `test_merge_does_not_touch_the_original_base` для LoRA); KAN-LoRA слияние
   явно отвергает (`test_refuses_to_merge`).
+- Общий хелпер `_build_merged_linear` сохраняет `bias`/`dtype`/`device` базы
+  и опускает `bias`, если у базы его нет (`test_merge_matches_base_bias_dtype_and_device`,
+  `test_merge_omits_bias_when_base_has_none` в `test_lora.py` и
+  `test_dora.py`) — регрессионная защита после выноса построения `nn.Linear`
+  из `LoRALinear.merge()`/`DoRALinear.merge()` в общий код.
 - Градиент доходит до обучаемых параметров адаптера, но не до
   `base.weight` (`test_gradients_reach_both_matrices` для LoRA,
   `test_gradients_reach_magnitude_and_both_matrices` для DoRA,

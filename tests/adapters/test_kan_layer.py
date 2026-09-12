@@ -86,3 +86,26 @@ def test_learnable_scale_stretches_grid(layer: KANLayer) -> None:
 
     x = torch.full((1, RANK), 5.0, dtype=torch.float64)
     assert torch.allclose(layer(x), x, atol=1e-9)
+
+
+def test_near_zero_scale_does_not_blow_up(layer: KANLayer) -> None:
+    """`input_scale` может выучиться вплотную к нулю: деление не должно дать inf/nan.
+
+    `0.1 / 1e-320` уже переполняет `float64` в `inf`, а `inf * 0` в рекурсии
+    Кокса — де Бура даёт `nan`, который через сумму по входным каналам
+    заражает выход по всем каналам сразу, а не только по пострадавшему.
+    """
+    with torch.no_grad():
+        layer.input_scale[0] = 1e-320
+        layer.input_scale[1] = -1e-320
+
+    x = torch.full((3, RANK), 0.1, dtype=torch.float64)
+    out = layer(x)
+    assert torch.isfinite(out).all()
+    assert torch.isfinite(layer.fraction_inside_grid(x)).all()
+
+
+def test_default_scale_unaffected_by_floor(layer: KANLayer) -> None:
+    """Пол на модуль масштаба не должен возмущать тождественную инициализацию."""
+    x = inside_grid()
+    assert torch.allclose(layer(x), x, atol=1e-10)

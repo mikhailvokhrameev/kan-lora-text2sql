@@ -67,8 +67,10 @@ class TrainReport:
 ```
 
 `fraction_inside_grid` — по одному значению на эпоху, только когда среди
-адаптеров модели есть хотя бы один `KANLoRALinear`; для LoRA и DoRA список
-остаётся пустым (`[]`). `optimizer_coverage` — результат
+адаптеров модели есть хотя бы один, у которого `last_fraction_inside_grid()`
+возвращает не `None`; для LoRA и DoRA (у которых этот метод не переопределён и
+наследуется от `AdapterLinear`, всегда возвращая `None`) список остаётся
+пустым (`[]`). `optimizer_coverage` — результат
 `OptimizerBundle.coverage()`, показывает, сколько параметров реально досталось
 `Muon`, а сколько — запасному `AdamW` (см. `docs/optimizers.md`).
 
@@ -93,7 +95,8 @@ def train(model, dataset, collator, optimizer_config, train_config, device) -> T
 1. `set_seed(train_config.seed)`, модель переводится на `device` и в режим
    `train()`.
 2. При `train_config.gradient_checkpointing=True` включается
-   `model.gradient_checkpointing_enable()` и `model.config.use_cache = False`
+   `model.gradient_checkpointing_enable()`, затем явно
+   `model.enable_input_require_grads()` и `model.config.use_cache = False`
    — чекпоинтинг несовместим с кешем ключей/значений при обучении.
 3. `DataLoader` с перемешиванием, детерминированным по тому же `seed`, и
    `collate_fn=collator`.
@@ -105,10 +108,19 @@ def train(model, dataset, collator, optimizer_config, train_config, device) -> T
    больше. Шаг (`clip_grad_norm_` → `step()` → `zero_grad()`) выполняется
    каждые `gradient_accumulation` батчей и дополнительно на последнем батче
    неполного хвоста эпохи (`index == len(loader)`), чтобы накопленный градиент
-   неполной группы не терялся.
+   неполной группы не терялся. Каждые `train_config.log_every` шагов (по
+   номеру батча внутри эпохи, `index % log_every == 0`) печатается отдельная
+   строка с номером шага и текущей функцией потерь батча — независимо от
+   печати по итогам эпохи (см. ниже) и независимо от того, кратен ли шаг
+   `gradient_accumulation`.
 6. После каждой эпохи — средняя функция потерь по эпохе, средняя доля
-   активаций в сетке по всем `KANLoRALinear` (`_mean_fraction_inside_grid`,
-   если такие адаптеры есть) и печать этих значений на русском.
+   активаций в сетке (`_mean_fraction_inside_grid`) и печать этих значений на
+   русском. `_mean_fraction_inside_grid` вызывает `last_fraction_inside_grid()`
+   полиморфно на каждом адаптере из `adapter_modules(model)`, без проверки
+   типа: усредняются только значения, отличные от `None` (их дают только
+   `KANLoRALinear`; у LoRA и DoRA — базовая реализация из `AdapterLinear`,
+   всегда `None`). Цикл обучения благодаря этому не знает про конкретные
+   классы адаптеров.
 7. По завершении — время выполнения (`time.perf_counter`) и пиковая
    видеопамять.
 
@@ -153,8 +165,54 @@ KAN-LoRA, при любом ранге адаптера и любой разум
 имеют отношения к гиперпараметрам реальных экспериментов (`2.0e-4`,
 зафиксированным в `docs/README.md` и плане).
 
+## `model.enable_input_require_grads()` при чекпоинтинге
+
+При `train_config.gradient_checkpointing=True` рядом с
+`model.gradient_checkpointing_enable()` явно вызывается
+`model.enable_input_require_grads()` (`train/loop.py`). Причина в том, что
+основа модели заморожена, а входные эмбеддинги — первый слой сети — сами по
+себе не требуют градиента; без `enable_input_require_grads()`
+`torch.utils.checkpoint` может не построить граф автоматического
+дифференцирования для checkpoint-сегмента, из-за чего градиент не доходит от
+функции потерь до весов адаптера внутри этого сегмента.
+
+Этот вызов — **защита на случай отката/понижения версии `transformers`, а не
+исправление бага, воспроизводимого в установленном в репозитории окружении.**
+Это подтверждено прямой проверкой (не только чтением кода):
+
+- На `transformers==5.17.0`, установленной в `.venv` этого репозитория,
+  `PreTrainedModel.gradient_checkpointing_enable()` уже сама вызывает
+  `self.enable_input_require_grads()` безусловно для всех causal LM
+  (`self.main_input_name == "input_ids"`). На этой версии обучение адаптера с
+  `gradient_checkpointing=True` уже работает корректно даже без явного вызова
+  в `train()` — регрессионный тест
+  `test_gradient_checkpointing_preserves_adapter_gradient`
+  (`tests/train/test_loop.py`) проходит и без патча.
+- На нижней границе версии, зафиксированной в `pyproject.toml`
+  (`transformers==4.46.0`), тот же код вызывает
+  `self.enable_input_require_grads()` только когда
+  `self._hf_peft_config_loaded` — то есть только при загрузке адаптеров через
+  библиотеку HF PEFT (`get_peft_model`). Адаптеры в этом проекте (LoRA, DoRA,
+  KAN-LoRA — `src/kanlora/adapters/`) внедряются собственным кодом
+  (`inject_adapters`), а не через HF PEFT, поэтому `_hf_peft_config_loaded`
+  никогда не выставляется, и на `transformers==4.46.0` без явного вызова
+  обучение с `gradient_checkpointing=True` действительно падает: проверено
+  прямым запуском обучения тестовой модели с `LoRA`-адаптером в изолированном
+  окружении с `transformers==4.46.0` — без патча `backward()` кидает
+  `RuntimeError: element 0 of tensors does not require grad and does not have
+  a grad_fn`; с явным `model.enable_input_require_grads()` градиент доходит до
+  `lora_b`, и обучение проходит как обычно.
+
+Итог: баг реален на нижней границе поддерживаемых версий `transformers`, но
+уже не воспроизводится на версии, установленной в текущем окружении, — апстрим
+перестал требовать HF PEFT для этого условия. Явный вызов оставлен, чтобы
+поведение не зависело от конкретной установленной версии зависимости.
+
 ## Проверенные инварианты
 
+- При `gradient_checkpointing=True` градиент доходит до адаптера так же, как и
+  без чекпоинтинга: `lora_b` меняется, функция потерь падает
+  (`test_gradient_checkpointing_preserves_adapter_gradient`).
 - Все три метода адаптации переобучивают двадцать примеров почти до нулевой
   функции потерь (`test_overfits_twenty_examples`, с размороженными нормой и
   эмбеддингами — см. выше).
@@ -170,6 +228,8 @@ KAN-LoRA, при любом ранге адаптера и любой разум
   любого другого теста.
 - Отчёт несёт время выполнения, покрытие оптимизатора и (на CPU — честно
   нулевую) пиковую память (`test_report_carries_timing_memory_and_coverage`).
+- Построчный лог печатается каждые `log_every` шагов и ни разу между ними
+  (`test_logs_loss_every_log_every_steps`).
 - `PeakMemoryTracker` возвращает `0` на CPU и идемпотентен при повторном
   `reset()` (`test_reports_zero_on_cpu`, `test_reset_is_idempotent_on_cpu`); на
   CUDA действительно отслеживает рост выделенной памяти
