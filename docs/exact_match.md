@@ -158,9 +158,10 @@ def exact_match(
   сценария: `easy`, `medium`, `hard`, `extra`, `all`
   (`test_hardness_breakdown_covers_all_levels`).
 
-## Не реализовано
+## Смежные модули
 
-Сборка конфигурации и карточки результата прогона, замер задержки
-генерации со слиянием адаптера и без — задачи 16–17 плана, ещё не сделаны.
 Execution Accuracy реализована отдельно — см. [`execution.md`](execution.md);
-мера выученной нелинейности — см. [`nonlinearity.md`](nonlinearity.md).
+мера выученной нелинейности — см. [`nonlinearity.md`](nonlinearity.md);
+конфигурация и карточка результата прогона — см.
+[`experiment-runner.md`](experiment-runner.md); замер задержки генерации
+со слиянием адаптера и без — см. [`latency.md`](latency.md).
