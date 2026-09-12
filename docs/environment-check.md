@@ -67,6 +67,23 @@ python scripts/check_environment.py [--data-root data]
 нужна собственная реализация — на момент проверки (2026-09-09, torch
 2.14.0) она не нужна, Muon есть в `torch.optim`.
 
+### `check_nltk_punkt() -> Check`
+
+Проверяет `nltk.data.find("tokenizers/punkt_tab")`. Официальный сценарий
+оценки Spider (`third_party/spider_eval/process_sql.py`, см.
+`docs/exact_match.md`) токенизирует сам SQL-запрос через
+`nltk.word_tokenize`, которому нужны скачанные данные `punkt_tab`; без
+проверки их отсутствие обнаружилось бы `LookupError` посреди оценки Exact
+Match, то есть после уже состоявшегося обучения, а не перед его началом.
+При отсутствии сообщает команду для скачивания: `python -m nltk.downloader
+punkt_tab`.
+
+Добавлена вместе с `nltk` в `pyproject.toml`: раньше зависимость не была
+объявлена явно и молча работала только потому, что тесты запускались
+интерпретатором, где `nltk` и его данные уже были установлены — на честно
+изолированном окружении (`uv sync` в чистый `.venv`) это привело бы к
+`ModuleNotFoundError`.
+
 ### `check_dataset(name: str, root: Path) -> list[Check]`
 
 Для `name` из `{"spider", "pauq"}` проверяет:
