@@ -1,8 +1,10 @@
 """Диагностика окружения перед запуском экспериментов.
 
-Отвечает на три вопроса, каждый из которых способен сорвать работу целиком:
-поддерживает ли сборка PyTorch данную видеокарту, есть ли Muon в torch.optim,
-и лежат ли на диске файлы наборов вместе с базами данных для Execution Accuracy.
+Отвечает на четыре вопроса, каждый из которых способен сорвать работу
+целиком: поддерживает ли сборка PyTorch данную видеокарту, есть ли Muon в
+torch.optim, скачаны ли данные токенизатора nltk (`punkt_tab`), нужные
+официальному скрипту оценки Spider, и лежат ли на диске файлы наборов вместе
+с базами данных для Execution Accuracy.
 
 Запуск: python scripts/check_environment.py [--data-root data]
 """
@@ -64,6 +66,26 @@ def check_muon() -> Check:
     return Check("Muon", present, detail)
 
 
+def check_nltk_punkt() -> Check:
+    """Официальный скрипт оценки Spider (`third_party/spider_eval/process_sql.py`)
+    вызывает `nltk.word_tokenize`, которому нужны скачанные данные `punkt_tab`.
+
+    Без этой проверки отсутствие данных обнаружилось бы `LookupError` посреди
+    оценки Exact Match — то есть после уже состоявшегося обучения, а не перед
+    его началом.
+    """
+    import nltk
+
+    try:
+        nltk.data.find("tokenizers/punkt_tab")
+        return Check("nltk: punkt_tab", True, "данные токенизатора найдены")
+    except LookupError:
+        return Check(
+            "nltk: punkt_tab", False,
+            "не найдены — выполните: python -m nltk.downloader punkt_tab",
+        )
+
+
 def check_dataset(name: str, root: Path) -> list[Check]:
     checks: list[Check] = []
     for filename in DATASET_FILES[name]:
@@ -86,7 +108,7 @@ def main() -> int:
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     arguments = parser.parse_args()
 
-    checks = [check_torch(), *check_cuda(), check_muon()]
+    checks = [check_torch(), *check_cuda(), check_muon(), check_nltk_punkt()]
     for name in DATASET_FILES:
         checks.extend(check_dataset(name, arguments.data_root / name))
 
