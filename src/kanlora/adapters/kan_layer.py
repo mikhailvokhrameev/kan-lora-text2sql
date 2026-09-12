@@ -23,6 +23,13 @@ from torch import nn
 
 from kanlora.adapters.spline import bspline_basis, greville_abscissae, make_knots
 
+# Пол на модуль input_scale: обучаемый масштаб делит вход (см. forward), и без
+# ограничения снизу может выучиться сколь угодно близким к нулю, доводя
+# деление до `inf`, а последующее `inf * 0` в базисе — до `nan`, который через
+# сумму по входным каналам заражает выход сразу по всем каналам. Знак масштаба
+# сохраняется (copysign), чтобы не менять направление растяжения сетки.
+_MIN_INPUT_SCALE_MAGNITUDE = 1e-4
+
 
 class KANLayer(nn.Module):
     """Отображение R^in -> R^out, при инициализации тождественное.
@@ -84,8 +91,20 @@ class KANLayer(nn.Module):
         self.base_weight.zero_()
         self.input_scale.fill_(1.0)
 
+    def _safe_input_scale_divisor(self) -> torch.Tensor:
+        """`input_scale` с полом на модуль, знак сохранён.
+
+        Используется только как делитель: сам параметр `input_scale`
+        (в том числе при обратном умножении на выходе `forward`) остаётся
+        неизменным, поэтому тождественная инициализация (`input_scale == 1.0`)
+        не затрагивается — пол начинает действовать лишь при выученных
+        значениях с модулем меньше `_MIN_INPUT_SCALE_MAGNITUDE`.
+        """
+        magnitude = self.input_scale.abs().clamp(min=_MIN_INPUT_SCALE_MAGNITUDE)
+        return torch.copysign(magnitude, self.input_scale)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        scaled = x / self.input_scale
+        scaled = x / self._safe_input_scale_divisor()
         basis = bspline_basis(scaled, self.knots, self.spline_order)
 
         spline = torch.einsum("...ib,oib->...oi", basis, self.spline_coefficients)
@@ -101,7 +120,7 @@ class KANLayer(nn.Module):
         участвует в вычислении.
         """
         lo, hi = self.grid_range
-        scaled = x / self.input_scale
+        scaled = x / self._safe_input_scale_divisor()
         return ((scaled >= lo) & (scaled <= hi)).to(x.dtype).mean()
 
     def parameter_count(self) -> int:
