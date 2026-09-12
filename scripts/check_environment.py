@@ -16,7 +16,9 @@ from pathlib import Path
 
 DATASET_FILES = {
     "spider": ("train_spider.json", "dev.json", "tables.json"),
-    "pauq": ("pauq_xsp_train.json", "pauq_xsp_test.json", "tables.json"),
+    # Имена и раскладка проверены по факту в репозитории ai-spiderweb/pauq
+    # (каталог dataset/): train/dev, не train/test, без префикса "xsp".
+    "pauq": ("pauq_train.json", "pauq_dev.json", "tables.json"),
 }
 
 
