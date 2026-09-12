@@ -77,6 +77,20 @@ def execution_accuracy(
 `db_ids` — `ValueError`, а не тихое усечение по меньшей длине, по тому же
 принципу, что и в `exact_match`/`exact_match_by_hardness`.
 
+## `count_available_databases`
+
+```python
+def count_available_databases(root: Path, layout: DatasetLayout, db_ids: Iterable[str]) -> int
+```
+
+Считает, для скольких **уникальных** `db_id` на диске нашёлся файл базы —
+дубликаты в `db_ids` схлопываются через `set(db_ids)` до подсчёта.
+Существует для `run_experiment.py` (`docs/experiment-runner.md`): решение,
+считать ли Execution Accuracy вообще, раньше принималось по одному
+произвольному `db_id` отложенной выборки (`database_path(root, layout,
+db_ids[0]).is_file()`), хотя выборка обычно ссылается на много разных баз —
+наличие файла для первого примера ничего не говорит об остальных.
+
 ## Проверенные инварианты
 
 - Успешное исполнение возвращает строки, `failed=False`
@@ -95,6 +109,11 @@ def execution_accuracy(
   (`test_accuracy_respects_order_by`).
 - Несовпадение длин `gold`/`predicted`/`db_ids` — `ValueError`
   (`test_mismatched_lengths_are_rejected`).
+- `count_available_databases` — `0` для пустого списка `db_ids`
+  (`test_count_available_databases_is_zero_for_empty_input`), считает только
+  реально присутствующие файлы, дубликаты `db_id` не завышают счёт
+  (`test_count_available_databases_counts_present_files_only`), и `0`, если
+  не найдено ни одной базы (`test_count_available_databases_is_zero_when_none_found`).
 
 ## Что известно отступление спецификации
 
@@ -106,6 +125,12 @@ def execution_accuracy(
 запроса, что дало бы `execution_accuracy == 0.0`, а не `null` — различие
 между «метрика не считалась» и «метрика равна нулю» делается на уровне
 сборки карточки результата — см. [`experiment-runner.md`](experiment-runner.md).
+
+Если найдены не все уникальные базы (частичная выкладка PAUQ), метрика всё
+равно считается — `execute_query` уже трактует отсутствующий файл как
+промах, что корректно занижает оценку, — но `run_experiment.py` печатает
+предупреждение с числом недостающих баз, чтобы частично измеренное
+значение не приняли за полностью чистое.
 
 ## Смежные модули
 
