@@ -81,6 +81,18 @@ self.scaling = config.alpha / config.rank
 Снимает `requires_grad` со всех параметров модуля. Используется в
 конструкторе `AdapterLinear` для заморозки `self.base`.
 
+### `_build_merged_linear(base: nn.Linear, weight: Tensor) -> nn.Linear`
+
+Общая часть `merge()` у LoRA и DoRA: создаёт `nn.Linear` той же формы,
+`dtype` и `device`, что и `base`, копирует в него переданный `weight` и
+`bias` из `base` (если он есть, иначе слитый слой остаётся без `bias`).
+У LoRA и DoRA расходится только выражение, которым получается итоговый
+`weight` (`base.weight + scaling * B A` против `effective_weight()`) —
+само построение `nn.Linear` и копирование `bias` было продублировано и
+вынесено в этот приватный хелпер модуля `base.py`, чтобы оба места не
+могли разойтись случайно (например, один забыл бы скопировать `bias`).
+Каждый вызывающий метод по-прежнему не трогает исходный `self.base`.
+
 ## B-сплайновый базис (`spline.py`)
 
 Чистая математика без обучаемых параметров — строительный блок для слоя
@@ -252,12 +264,11 @@ delta_W * x = (alpha / r) * B (A x)
   тождественно равна нулю.
 - `analytic_parameter_count() -> int` — `rank * (in_features + out_features)`.
 - `can_merge` — всегда `True`.
-- `merge() -> nn.Linear` — создаёт новый `nn.Linear` с
-  `weight = base.weight + scaling * (lora_b @ lora_a)` и копией `bias`
-  (если он есть). Исходный `self.base` не изменяется: слияние выполняется в
-  новый объект, старый остаётся пригодным для повторного использования
-  (в частности, для будущего DoRA-адаптера, который также оборачивает
-  `nn.Linear` как самостоятельную основу).
+- `merge() -> nn.Linear` — считает `weight = base.weight + scaling * (lora_b @ lora_a)`
+  и передаёт его в общий хелпер `_build_merged_linear` (см. раздел
+  `AdapterLinear` выше), который и создаёт новый `nn.Linear` с этим весом и
+  копией `bias`. Исходный `self.base` не изменяется: слияние выполняется в
+  новый объект, старый остаётся пригодным для повторного использования.
 
 Слияние (`merge`) существует потому, что LoRA — линейная поправка: после
 обучения её можно поглотить в веса и не платить дополнительной задержкой
@@ -317,9 +328,9 @@ LoRA: при `B = 0` направление `V` в точности равно `
   параметрах адаптера, поэтому после обучения `effective_weight()`
   поглощается в обычный `nn.Linear` и на инференсе не остаётся никакой
   дополнительной надстройки.
-- `merge() -> nn.Linear` — новый `nn.Linear` с
-  `weight = effective_weight()` и скопированным `bias`; исходный `base` не
-  изменяется, аналогично `LoRALinear.merge()`.
+- `merge() -> nn.Linear` — передаёт `effective_weight()` в тот же общий
+  хелпер `_build_merged_linear`, что и `LoRALinear.merge()`; исходный `base`
+  не изменяется.
 
 ### Сводимость к LoRA
 
@@ -435,6 +446,11 @@ delta_W * x = (alpha / r) * B * phi(A x)
   (`test_merged_linear_reproduces_adapter_output` для LoRA и DoRA,
   `test_merge_does_not_touch_the_original_base` для LoRA); KAN-LoRA слияние
   явно отвергает (`test_refuses_to_merge`).
+- Общий хелпер `_build_merged_linear` сохраняет `bias`/`dtype`/`device` базы
+  и опускает `bias`, если у базы его нет (`test_merge_matches_base_bias_dtype_and_device`,
+  `test_merge_omits_bias_when_base_has_none` в `test_lora.py` и
+  `test_dora.py`) — регрессионная защита после выноса построения `nn.Linear`
+  из `LoRALinear.merge()`/`DoRALinear.merge()` в общий код.
 - Градиент доходит до обучаемых параметров адаптера, но не до
   `base.weight` (`test_gradients_reach_both_matrices` для LoRA,
   `test_gradients_reach_magnitude_and_both_matrices` для DoRA,
