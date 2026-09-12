@@ -80,6 +80,40 @@ def test_overfits_twenty_examples(tiny_causal_lm, method: str) -> None:
 
 
 @pytest.mark.slow
+def test_gradient_checkpointing_preserves_adapter_gradient(tiny_causal_lm) -> None:
+    """С включённым gradient_checkpointing адаптер обязан обучаться так же, как без него.
+
+    Регрессионная защита для входных эмбеддингов без requires_grad=True при
+    заморожённой основе: без явного enable_input_require_grads() градиент до
+    LoRA может не дойти при чекпоинтинге (см. docs/train-loop.md). В связке с
+    transformers, установленной в этом окружении, баг уже не воспроизводится
+    (апстрим сам вызывает enable_input_require_grads() для causal LM), поэтому
+    тест служит защитой от отката/понижения версии transformers, а не тестом,
+    падающим прямо сейчас.
+    """
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+    lora_b_name = next(
+        name for name, parameter in tiny_causal_lm.named_parameters()
+        if name.endswith("lora_b") and parameter.requires_grad
+    )
+    before = dict(tiny_causal_lm.named_parameters())[lora_b_name].detach().clone()
+
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
+        train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=1,
+                                 gradient_checkpointing=True),
+        device=DEVICE,
+    )
+
+    after = dict(tiny_causal_lm.named_parameters())[lora_b_name]
+    assert not torch.equal(before, after), "lora_b не изменился при gradient_checkpointing=True"
+    assert report.epoch_losses[-1] < report.epoch_losses[0]
+
+
+@pytest.mark.slow
 def test_only_adapter_parameters_change(tiny_causal_lm) -> None:
     """Сверка того, что обучаются ровно адаптеры: основа обязана остаться прежней."""
     inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))

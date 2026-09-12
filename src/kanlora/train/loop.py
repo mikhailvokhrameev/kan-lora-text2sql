@@ -80,6 +80,11 @@ def train(
 
     if train_config.gradient_checkpointing:
         model.gradient_checkpointing_enable()
+        # Явно, а не полагаясь на автоматику transformers: на пришпиленной нижней
+        # границе версии (4.46) она включается только под HF PEFT, а этот проект
+        # свои адаптеры через PEFT не заводит — без вызова градиент к адаптерам
+        # не доходит через чекпоинтинг, если вход не требует grad.
+        model.enable_input_require_grads()
         model.config.use_cache = False
 
     loader = DataLoader(
