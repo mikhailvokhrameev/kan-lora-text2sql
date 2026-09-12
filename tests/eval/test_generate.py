@@ -28,6 +28,26 @@ def test_empty_generation_stays_empty() -> None:
     assert normalize_sql("   ") == ""
 
 
+def test_does_not_cut_at_semicolon_inside_single_quoted_string() -> None:
+    text = "SELECT * FROM t WHERE name = 'a;b' ; SELECT c"
+    assert normalize_sql(text) == "SELECT * FROM t WHERE name = 'a;b'"
+
+
+def test_does_not_cut_at_semicolon_inside_double_quoted_string() -> None:
+    text = 'SELECT * FROM t WHERE name = "a;b" ; SELECT c'
+    assert normalize_sql(text) == 'SELECT * FROM t WHERE name = "a;b"'
+
+
+def test_does_not_cut_at_newline_inside_quoted_string() -> None:
+    text = "SELECT * FROM t WHERE name = 'a\nb'\nQuestion: next"
+    assert normalize_sql(text) == "SELECT * FROM t WHERE name = 'a b'"
+
+
+def test_escaped_quote_does_not_end_the_string() -> None:
+    text = r"SELECT * FROM t WHERE name = 'it\'s fine; ok' ; SELECT c"
+    assert normalize_sql(text) == r"SELECT * FROM t WHERE name = 'it\'s fine; ok'"
+
+
 @pytest.mark.slow
 def test_generates_one_string_per_prompt(tiny_causal_lm, tiny_tokenizer) -> None:
     prompts = ["SELECT", "FROM", "WHERE"]

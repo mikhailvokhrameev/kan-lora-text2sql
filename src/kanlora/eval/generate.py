@@ -24,10 +24,38 @@ def normalize_sql(text: str) -> str:
     """Обрезает продолжение после запроса и приводит пробелы к одному виду.
 
     Модель охотно пишет дальше собственный следующий вопрос; всё после первого
-    перевода строки или точки с запятой к ответу не относится.
+    перевода строки или точки с запятой к ответу не относится. Резать нужно
+    только вне строковых литералов — иначе `;` или перевод строки, случайно
+    оказавшиеся частью значения (`WHERE name = 'a;b'`), обрежут ещё валидный
+    запрос.
     """
-    head = text.split("\n", 1)[0].split(";", 1)[0]
+    head = _cut_outside_quotes(text, "\n;")
     return _WHITESPACE.sub(" ", head).strip()
+
+
+def _cut_outside_quotes(text: str, cut_chars: str) -> str:
+    """Возвращает префикс `text` до первого символа из `cut_chars` вне кавычек.
+
+    Отслеживает состояние «внутри одинарной/двойной кавычки» посимвольно и
+    учитывает экранирование (`\\'`, `\\"`), чтобы не закрыть строковый литерал
+    раньше времени.
+    """
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(text):
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+        elif char in cut_chars:
+            return text[:index]
+    return text
 
 
 @torch.inference_mode()
