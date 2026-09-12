@@ -203,6 +203,32 @@ def test_gradient_accumulation_matches_the_larger_batch(tiny_causal_lm) -> None:
 
 
 @pytest.mark.slow
+def test_logs_loss_every_log_every_steps(tiny_causal_lm, capsys) -> None:
+    """Построчный лог должен печататься каждые log_every шагов, а не только за эпоху."""
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+
+    train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
+        train_config=TrainConfig(
+            epochs=1, batch_size=4, gradient_accumulation=1,
+            gradient_checkpointing=False, log_every=2,
+        ),
+        device=DEVICE,
+    )
+
+    lines = capsys.readouterr().out.splitlines()
+    step_lines = [line for line in lines if line.startswith("шаг ")]
+
+    # 20 примеров, batch_size=4 -> 5 шагов за эпоху; log_every=2 -> шаги 2 и 4.
+    assert len(step_lines) == 2
+    assert step_lines[0].startswith("шаг 2/5")
+    assert step_lines[1].startswith("шаг 4/5")
+
+
+@pytest.mark.slow
 def test_report_carries_timing_memory_and_coverage(tiny_causal_lm) -> None:
     inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
 

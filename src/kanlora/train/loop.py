@@ -110,9 +110,13 @@ def train(
             loss = model(**batch).loss
             (loss / train_config.gradient_accumulation).backward()
 
-            epoch_total += loss.item()
+            step_loss = loss.item()
+            epoch_total += step_loss
             epoch_batches += 1
-            report.step_losses.append(loss.item())
+            report.step_losses.append(step_loss)
+
+            if index % train_config.log_every == 0:
+                print(f"шаг {index}/{len(loader)} (эпоха {epoch + 1}): функция потерь {step_loss:.4f}")
 
             if index % train_config.gradient_accumulation == 0 or index == len(loader):
                 bundle.clip_grad_norm_(optimizer_config.max_grad_norm)
