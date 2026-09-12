@@ -12,12 +12,19 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from kanlora.data.loaders import DatasetLayout, database_path
 
-__all__ = ["ExecutionOutcome", "execute_query", "execution_accuracy", "results_match"]
+__all__ = [
+    "ExecutionOutcome",
+    "count_available_databases",
+    "execute_query",
+    "execution_accuracy",
+    "results_match",
+]
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,19 @@ def execute_query(db_path: Path, query: str, timeout: float = 30.0) -> Execution
     finally:
         if connection is not None:
             connection.close()
+
+
+def count_available_databases(
+    root: Path, layout: DatasetLayout, db_ids: Iterable[str]
+) -> int:
+    """Считает, для скольких уникальных `db_id` на диске нашёлся файл базы.
+
+    Используется вместо проверки одного произвольного `db_id`
+    (`database_path(root, layout, db_ids[0]).is_file()`): у Spider/PAUQ
+    отложенная выборка ссылается на много разных баз, и наличие файла для
+    первого примера ничего не говорит об остальных.
+    """
+    return sum(1 for db_id in set(db_ids) if database_path(root, layout, db_id).is_file())
 
 
 def results_match(

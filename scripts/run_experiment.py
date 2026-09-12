@@ -27,10 +27,10 @@ from kanlora.analysis.spline_stats import model_nonlinearity  # noqa: E402
 from kanlora.config import apply_overrides, load_config  # noqa: E402
 from kanlora.data.collate import Collator, build_dataset, build_prompts  # noqa: E402
 from kanlora.data.loaders import (  # noqa: E402
-    LAYOUTS, database_path, load_dataset_schemas, load_examples, subsample,
+    LAYOUTS, load_dataset_schemas, load_examples, subsample,
 )
 from kanlora.eval.exact_match import exact_match_by_hardness  # noqa: E402
-from kanlora.eval.execution import execution_accuracy  # noqa: E402
+from kanlora.eval.execution import count_available_databases, execution_accuracy  # noqa: E402
 from kanlora.eval.generate import generate_sql  # noqa: E402
 from kanlora.results import build_result_card, write_result_card  # noqa: E402
 from kanlora.train.loop import set_seed, train  # noqa: E402
@@ -129,12 +129,22 @@ def main() -> int:
 
     # Execution Accuracy требует файлов баз. Их отсутствие — заранее оговорённое
     # отступление, а не сбой: метрика остаётся null, и это видно в карточке.
-    if database_path(root, layout, db_ids[0]).is_file():
+    # Проверяются все уникальные db_id отложенной выборки, а не только первый:
+    # набор ссылается на много разных баз, и первая ничего не говорит про
+    # остальные.
+    unique_db_ids = set(db_ids)
+    available = count_available_databases(root, layout, unique_db_ids)
+    if available == 0:
+        print("файлы баз данных не найдены: Execution Accuracy не считается")
+    else:
+        if available < len(unique_db_ids):
+            print(
+                f"внимание: не найдено баз данных: {len(unique_db_ids) - available} из "
+                f"{len(unique_db_ids)} — Execution Accuracy посчитана частично"
+            )
         metrics["execution_accuracy"] = execution_accuracy(
             gold, predicted, db_ids, root, layout
         )
-    else:
-        print("файлы баз данных не найдены: Execution Accuracy не считается")
 
     spline_stats = model_nonlinearity(model) or None
     card = build_result_card(

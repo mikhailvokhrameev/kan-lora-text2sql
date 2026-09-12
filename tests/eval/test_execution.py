@@ -11,7 +11,12 @@ from pathlib import Path
 import pytest
 
 from kanlora.data.spider import SPIDER_LAYOUT
-from kanlora.eval.execution import execute_query, execution_accuracy, results_match
+from kanlora.eval.execution import (
+    count_available_databases,
+    execute_query,
+    execution_accuracy,
+    results_match,
+)
 
 DB = "shop"
 
@@ -93,3 +98,17 @@ def test_accuracy_respects_order_by(root: Path) -> None:
 def test_mismatched_lengths_are_rejected(root: Path) -> None:
     with pytest.raises(ValueError, match="длины"):
         execution_accuracy(["SELECT 1"], [], [DB], root, SPIDER_LAYOUT)
+
+
+def test_count_available_databases_is_zero_for_empty_input(root: Path) -> None:
+    assert count_available_databases(root, SPIDER_LAYOUT, []) == 0
+
+
+def test_count_available_databases_counts_present_files_only(root: Path) -> None:
+    assert (
+        count_available_databases(root, SPIDER_LAYOUT, [DB, "missing_db", "also_missing"]) == 1
+    )
+
+
+def test_count_available_databases_is_zero_when_none_found(tmp_path: Path) -> None:
+    assert count_available_databases(tmp_path, SPIDER_LAYOUT, ["missing_db"]) == 0
