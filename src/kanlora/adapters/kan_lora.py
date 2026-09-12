@@ -46,14 +46,14 @@ class KANLoRALinear(AdapterLinear):
         if not config.learn_input_scale:
             self.kan.input_scale.requires_grad_(False)
 
-        self._fraction_inside_grid: float | None = None
+        self._fraction_inside_grid: torch.Tensor | None = None
         self.register_buffer("observed_lo", torch.tensor(float("inf")))
         self.register_buffer("observed_hi", torch.tensor(float("-inf")))
 
     def delta(self, x: torch.Tensor) -> torch.Tensor:
         projected = torch.nn.functional.linear(x, self.lora_a)
         with torch.no_grad():
-            self._fraction_inside_grid = self.kan.fraction_inside_grid(projected).item()
+            self._fraction_inside_grid = self.kan.fraction_inside_grid(projected)
             self.observed_lo = torch.minimum(self.observed_lo, projected.min())
             self.observed_hi = torch.maximum(self.observed_hi, projected.max())
         return self.scaling * torch.nn.functional.linear(self.kan(projected), self.lora_b)
@@ -68,7 +68,7 @@ class KANLoRALinear(AdapterLinear):
         неработающими параметрами — самая частая скрытая ошибка в реализациях
         KAN-адаптеров. Поэтому величина снимается на каждом проходе.
         """
-        return self._fraction_inside_grid
+        return self._fraction_inside_grid.item() if self._fraction_inside_grid is not None else None
 
     def observed_range(self) -> tuple[float, float]:
         """Фактический размах входа слоя KAN, накопленный за все проходы.
