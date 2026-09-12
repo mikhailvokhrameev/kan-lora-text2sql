@@ -12,7 +12,7 @@ import pytest
 import torch
 
 from kanlora.adapters.base import AdapterConfig
-from kanlora.adapters.inject import inject_adapters
+from kanlora.adapters.inject import adapter_modules, inject_adapters
 from kanlora.adapters.kan_layer import KANLayer
 from kanlora.analysis.spline_stats import (
     layer_nonlinearity,
@@ -87,3 +87,30 @@ def test_model_summary_covers_every_kan_adapter(tiny_causal_lm) -> None:
 def test_model_summary_is_empty_for_linear_methods(tiny_causal_lm) -> None:
     inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
     assert model_nonlinearity(tiny_causal_lm) == {}
+
+
+def test_measurement_interval_is_taken_from_the_caller() -> None:
+    """Мерить надо там, куда попадают активации, а не по всей области определения."""
+    layer = KANLayer(2, 2, grid_size=5, spline_order=3, dtype=torch.float64)
+    torch.manual_seed(0)
+    with torch.no_grad():
+        layer.spline_coefficients.add_(0.5 * torch.randn_like(layer.spline_coefficients))
+
+    wide = max(item.nonlinearity for item in layer_nonlinearity(layer, -0.99, 0.99))
+    narrow = max(item.nonlinearity for item in layer_nonlinearity(layer, -0.05, 0.05))
+    assert narrow < wide, "на узком отрезке любая гладкая функция ближе к прямой"
+
+
+def test_model_summary_uses_supplied_ranges(tiny_causal_lm) -> None:
+    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
+    for _, module in adapter_modules(tiny_causal_lm):
+        with torch.no_grad():
+            module.kan.spline_coefficients.add_(
+                0.5 * torch.randn_like(module.kan.spline_coefficients)
+            )
+
+    names = [name for name, _ in adapter_modules(tiny_causal_lm)]
+    wide = model_nonlinearity(tiny_causal_lm, {name: (-0.99, 0.99) for name in names})
+    narrow = model_nonlinearity(tiny_causal_lm, {name: (-0.05, 0.05) for name in names})
+
+    assert narrow[names[0]]["max"] < wide[names[0]]["max"]

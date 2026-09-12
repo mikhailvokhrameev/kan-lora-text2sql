@@ -75,16 +75,32 @@ def layer_nonlinearity(
     return stats
 
 
-def model_nonlinearity(model: torch.nn.Module) -> dict[str, dict[str, float]]:
-    """Сводка по всем KAN-адаптерам модели. Для LoRA и DoRA возвращает пустой словарь."""
+def model_nonlinearity(
+    model: torch.nn.Module, ranges: dict[str, tuple[float, float]] | None = None
+) -> dict[str, dict[str, float]]:
+    """Сводка по всем KAN-адаптерам модели. Для LoRA и DoRA возвращает пустой словарь.
+
+    Отрезок измерения для каждого адаптера берётся из `ranges`, если он задан;
+    иначе — фактический размах, накопленный адаптером за прошедшие проходы
+    (`observed_range`), а если проходов ещё не было — вся сетка сплайна.
+    Подгонять прямую нужно там, куда реально попадают активации, а не по всей
+    области определения: иначе индекс завышается на неиспользуемой части сетки.
+    """
     summary: dict[str, dict[str, float]] = {}
 
     for name, module in adapter_modules(model):
         if not isinstance(module, KANLoRALinear):
             continue
 
-        lo, hi = module.kan.grid_range
-        values = [item.nonlinearity for item in layer_nonlinearity(module.kan, 0.99 * lo, 0.99 * hi)]
+        if ranges is not None and name in ranges:
+            lo, hi = ranges[name]
+        else:
+            lo, hi = module.observed_range()
+            if lo > hi:
+                grid_lo, grid_hi = module.kan.grid_range
+                lo, hi = 0.99 * grid_lo, 0.99 * grid_hi
+
+        values = [item.nonlinearity for item in layer_nonlinearity(module.kan, lo, hi)]
         fraction = module.last_fraction_inside_grid()
         summary[name] = {
             "mean": sum(values) / len(values),

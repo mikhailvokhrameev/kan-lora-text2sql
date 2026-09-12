@@ -1,0 +1,41 @@
+# Основная конфигурация. Варианты матрицы задаются ключами командной строки,
+# а не отдельными файлами: 22 почти одинаковых файла — это 22 места, где
+# гиперпараметр может незаметно разойтись между методами.
+model_name: Qwen/Qwen2.5-Coder-0.5B-Instruct
+data_root: data
+
+method: lora
+dataset: spider
+seed: 0
+
+# Урезание обучающей выборки — единственный параметр, который допускается
+# менять после старта, и менять его надо один раз для всех прогонов сразу.
+train_subset: 2500
+# Зерно выборки отдельно от зерна обучения: выборка обязана быть одной и той
+# же для всех трёх методов и всех трёх зёрен обучения.
+subsample_seed: 12345
+
+max_length: 768
+eval_limit: null
+eval_batch_size: 8
+max_new_tokens: 128
+
+adapter:
+  rank: 8
+  alpha: 16.0
+  grid_size: 5
+  spline_order: 3
+  learn_input_scale: true
+
+train:
+  epochs: 2
+  batch_size: 1
+  gradient_accumulation: 8
+  gradient_checkpointing: true
+  log_every: 20
+
+optimizer:
+  name: adamw
+  learning_rate: 2.0e-4
+  weight_decay: 0.0
+  max_grad_norm: 1.0

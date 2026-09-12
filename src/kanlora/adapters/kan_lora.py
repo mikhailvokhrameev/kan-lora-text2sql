@@ -47,11 +47,15 @@ class KANLoRALinear(AdapterLinear):
             self.kan.input_scale.requires_grad_(False)
 
         self._fraction_inside_grid: float | None = None
+        self.register_buffer("observed_lo", torch.tensor(float("inf")))
+        self.register_buffer("observed_hi", torch.tensor(float("-inf")))
 
     def delta(self, x: torch.Tensor) -> torch.Tensor:
         projected = torch.nn.functional.linear(x, self.lora_a)
         with torch.no_grad():
             self._fraction_inside_grid = self.kan.fraction_inside_grid(projected).item()
+            self.observed_lo = torch.minimum(self.observed_lo, projected.min())
+            self.observed_hi = torch.maximum(self.observed_hi, projected.max())
         return self.scaling * torch.nn.functional.linear(self.kan(projected), self.lora_b)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -65,6 +69,15 @@ class KANLoRALinear(AdapterLinear):
         KAN-адаптеров. Поэтому величина снимается на каждом проходе.
         """
         return self._fraction_inside_grid
+
+    def observed_range(self) -> tuple[float, float]:
+        """Фактический размах входа слоя KAN, накопленный за все проходы.
+
+        `(inf, -inf)` до первого прохода — намеренно немой диапазон, а не
+        значение по умолчанию сетки: пустой размах обязан быть отличим от
+        размаха, реально попавшего внутрь сетки.
+        """
+        return float(self.observed_lo), float(self.observed_hi)
 
     def analytic_parameter_count(self) -> int:
         rank = self.config.rank
