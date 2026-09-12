@@ -17,6 +17,26 @@ from torch import nn
 __all__ = ["AdapterConfig", "AdapterLinear", "freeze"]
 
 
+def _build_merged_linear(base: nn.Linear, weight: torch.Tensor) -> nn.Linear:
+    """Строит nn.Linear с готовым весом поверх формы/dtype/device и bias базы.
+
+    Общая часть merge() у LoRA и DoRA — они расходятся только в выражении
+    для итогового веса, поэтому это выражение остаётся вызывающей стороне.
+    """
+    merged = nn.Linear(
+        base.in_features,
+        base.out_features,
+        bias=base.bias is not None,
+        device=base.weight.device,
+        dtype=base.weight.dtype,
+    )
+    with torch.no_grad():
+        merged.weight.copy_(weight)
+        if base.bias is not None:
+            merged.bias.copy_(base.bias)
+    return merged
+
+
 @dataclass(frozen=True)
 class AdapterConfig:
     """Гиперпараметры адаптера, общие для всех трёх методов.

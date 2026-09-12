@@ -89,6 +89,21 @@ def test_merged_linear_reproduces_adapter_output(adapter: DoRALinear) -> None:
     assert torch.allclose(merged(x), adapter(x), atol=1e-10)
 
 
+def test_merge_matches_base_bias_dtype_and_device(base: nn.Linear, adapter: DoRALinear) -> None:
+    merged = adapter.merge()
+    assert isinstance(merged, nn.Linear)
+    assert (merged.bias is not None) == (base.bias is not None)
+    assert merged.weight.dtype == base.weight.dtype
+    assert merged.weight.device == base.weight.device
+
+
+def test_merge_omits_bias_when_base_has_none(config: AdapterConfig) -> None:
+    base_without_bias = nn.Linear(IN_FEATURES, OUT_FEATURES, bias=False, dtype=torch.float64)
+    adapter_without_bias = DoRALinear(base_without_bias, config)
+    merged = adapter_without_bias.merge()
+    assert merged.bias is None
+
+
 def test_gradients_reach_magnitude_and_both_matrices(adapter: DoRALinear) -> None:
     with torch.no_grad():
         adapter.lora_b.normal_()

@@ -15,7 +15,7 @@ import math
 import torch
 from torch import nn
 
-from kanlora.adapters.base import AdapterConfig, AdapterLinear
+from kanlora.adapters.base import AdapterConfig, AdapterLinear, _build_merged_linear
 
 __all__ = ["LoRALinear"]
 
@@ -43,15 +43,5 @@ class LoRALinear(AdapterLinear):
         return True
 
     def merge(self) -> nn.Linear:
-        merged = nn.Linear(
-            self.base.in_features,
-            self.base.out_features,
-            bias=self.base.bias is not None,
-            device=self.base.weight.device,
-            dtype=self.base.weight.dtype,
-        )
-        with torch.no_grad():
-            merged.weight.copy_(self.base.weight + self.scaling * (self.lora_b @ self.lora_a))
-            if self.base.bias is not None:
-                merged.bias.copy_(self.base.bias)
-        return merged
+        weight = self.base.weight + self.scaling * (self.lora_b @ self.lora_a)
+        return _build_merged_linear(self.base, weight)
