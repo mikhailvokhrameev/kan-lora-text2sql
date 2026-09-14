@@ -45,3 +45,6 @@ class LoRALinear(AdapterLinear):
     def merge(self) -> nn.Linear:
         weight = self.base.weight + self.scaling * (self.lora_b @ self.lora_a)
         return _build_merged_linear(self.base, weight)
+
+    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
+        return (self.lora_a, self.lora_b)

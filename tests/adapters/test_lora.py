@@ -100,3 +100,7 @@ def test_gradients_reach_both_matrices(adapter: LoRALinear) -> None:
     assert adapter.lora_a.grad is not None
     assert adapter.lora_b.grad is not None
     assert adapter.base.weight.grad is None
+
+
+def test_matrix_parameters_are_lora_a_and_lora_b(adapter: LoRALinear) -> None:
+    assert adapter.matrix_parameters() == (adapter.lora_a, adapter.lora_b)

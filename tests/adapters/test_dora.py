@@ -114,3 +114,8 @@ def test_gradients_reach_magnitude_and_both_matrices(adapter: DoRALinear) -> Non
         assert parameter.grad is not None, name
         assert torch.isfinite(parameter.grad).all(), name
     assert adapter.base.weight.grad is None
+
+
+def test_matrix_parameters_are_lora_a_and_lora_b(adapter: DoRALinear) -> None:
+    """Вектор модуля в список не входит: у него нет формы линейного отображения."""
+    assert adapter.matrix_parameters() == (adapter.lora_a, adapter.lora_b)

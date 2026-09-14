@@ -3,27 +3,31 @@
 **Модуль:** `src/kanlora/train/optimizers.py`
 **Тесты:** `tests/train/test_optimizers.py`
 
-## Зачем разводка по размерности
+## Зачем разводка по роли параметра
 
-`torch.optim.Muon` принимает только двумерные параметры и отвергает всё
-прочее жёсткой ошибкой `ValueError: Muon only supports 2D parameters`. Три
-сравниваемых метода адаптации дают разный набор форм обучаемых параметров,
-поэтому покрытие Muon у них разное:
+`torch.optim.Muon` ортогонализует направление обновления — операция,
+осмысленная только для параметра, который вычисляется как `y = W @ x`,
+то есть для настоящей матрицы линейного отображения. Критерий поэтому не
+«двумерность» тензора, а `AdapterLinear.matrix_parameters()` — явный список,
+который каждый адаптер составляет сам:
 
-- **LoRA** — обе матрицы (`lora_a`, `lora_b`) двумерны, Muon покрывает метод
-  целиком.
-- **DoRA** — те же две матрицы плюс одномерный вектор модуля `magnitude`,
-  который Muon не принимает.
-- **KAN-LoRA** — те же две матрицы плюс параметры `KANLayer`, среди которых
-  `spline_coefficients` трёхмерен (`spline_scale` и `base_weight` двумерны,
-  `input_scale` одномерен).
+- **LoRA** — обе матрицы (`lora_a`, `lora_b`) входят в `matrix_parameters()`,
+  Muon покрывает метод целиком.
+- **DoRA** — те же две матрицы; одномерный вектор модуля `magnitude` в
+  список не входит и Muon его не увидит.
+- **KAN-LoRA** — те же две матрицы; ни один параметр `KANLayer` в список не
+  входит, включая `spline_scale` и `base_weight` — они двумерны по форме
+  (ранг × ранг), но участвуют в вычислении поэлементно
+  (`spline_scale * spline`), а не матричным умножением, и поэтому не
+  задают линейного отображения, которое можно было бы ортогонализовать.
 
 Это не техническая деталь реализации, а самостоятельный результат работы:
 индуктивное смещение современного оптимизатора не распространяется на
-нелинейную часть адаптера, и прогон KAN-LoRA с Muon всегда гибридный —
-двумерные матрицы идёт в `Muon`, остальное — в запасной `AdamW`. Модуль
-даёт этому разбиению код, тест и величину (`coverage()`), которая идёт в
-карточку результата эксперимента.
+нелинейную часть адаптера ни в каком виде, и прогон KAN-LoRA с Muon всегда
+гибридный — доля Muon у KAN-LoRA в точности равна доле A и B, той же, что
+и у LoRA с DoRA, а весь слой `KANLayer` целиком достаётся запасному `AdamW`.
+Модуль даёт этому разбиению код, тест и величину (`coverage()`), которая
+идёт в карточку результата эксперимента.
 
 Оба оптимизатора обучают параметры с одной и той же скоростью обучения —
 как и все три метода адаптации по методологии проекта (Задача 19 плана
@@ -48,18 +52,20 @@ class OptimizerConfig:
 `OptimizerBundle.clip_grad_norm_()` (см. ниже) из цикла обучения, который
 читает значение из конфигурации самостоятельно.
 
-## `split_by_dimension`
+## `split_by_matrix_role`
 
 ```python
-def split_by_dimension(
-    parameters: Iterable[nn.Parameter],
+def split_by_matrix_role(
+    model: nn.Module,
 ) -> tuple[list[nn.Parameter], list[nn.Parameter]]
 ```
 
-Сначала отбирает только обучаемые параметры (`requires_grad is True`), затем
-делит их на двумерные и все прочие по `p.dim()`. Ни один параметр не
-теряется и не дублируется между двумя списками — на этом строится
-`test_split_loses_and_duplicates_nothing`.
+Собирает через `adapter_modules(model)` (см. `adapters/inject.py`) множество
+id параметров, которые каждый внедрённый адаптер объявил через
+`matrix_parameters()`, затем отбирает обучаемые параметры модели
+(`requires_grad is True`) и делит их по принадлежности этому множеству.
+Ни один параметр не теряется и не дублируется между двумя списками — на
+этом строится `test_split_loses_and_duplicates_nothing`.
 
 ## `OptimizerBundle`
 
@@ -88,7 +94,7 @@ def split_by_dimension(
 ## `build_optimizer`
 
 ```python
-def build_optimizer(parameters: Iterable[nn.Parameter], config: OptimizerConfig) -> OptimizerBundle
+def build_optimizer(model: nn.Module, config: OptimizerConfig) -> OptimizerBundle
 ```
 
 Диспетчер по `config.name` через словарь `{"adamw": _build_adamw, "muon":
@@ -100,22 +106,25 @@ _build_muon}`. Неизвестное имя (например, `"lion"`) пад
 
 - `_build_adamw` — все обучаемые параметры в одном `torch.optim.AdamW`;
   группы покрытия — `{"adamw": все параметры, "muon": []}`.
-- `_build_muon` — делит параметры через `split_by_dimension`; создаёт
-  `torch.optim.Muon` для двумерных (если список не пуст) и `torch.optim.AdamW`
-  для остальных (если список не пуст); группы покрытия —
-  `{"muon": двумерные, "adamw": остальные}`.
+- `_build_muon` — делит параметры через `split_by_matrix_role`; создаёт
+  `torch.optim.Muon` для настоящих матриц (если список не пуст) и
+  `torch.optim.AdamW` для остальных (если список не пуст); группы покрытия —
+  `{"muon": матрицы, "adamw": остальные}`.
 
 ## Проверенные инварианты
 
-- Разводка по размерности не теряет и не дублирует параметры, и в первую
-  группу попадают только двумерные (`test_split_loses_and_duplicates_nothing`,
-  `test_split_puts_only_matrices_in_the_first_group`), для всех трёх
-  адаптеров сразу (LoRA, DoRA, KAN-LoRA — общая фикстура с параметризацией).
+- Разводка по роли параметра не теряет и не дублирует параметры, и в первую
+  группу попадают ровно те, что адаптер сам назвал через
+  `matrix_parameters()` (`test_split_loses_and_duplicates_nothing`,
+  `test_split_puts_only_declared_matrix_parameters_in_the_first_group`), для
+  всех трёх адаптеров сразу (LoRA, DoRA, KAN-LoRA — общая фикстура с
+  параметризацией).
 - Фактическое покрытие Muon для каждого метода совпадает с ожиданием из
-  формы параметров: LoRA — целиком (`test_lora_is_fully_covered_by_muon`),
+  `matrix_parameters()`: LoRA — целиком (`test_lora_is_fully_covered_by_muon`),
   DoRA — без вектора модуля (`test_dora_magnitude_falls_back_to_adamw`),
-  KAN-LoRA — без коэффициентов сплайна
-  (`test_kan_spline_coefficients_fall_back_to_adamw`).
+  KAN-LoRA — без всего слоя `KANLayer`, включая двумерные `spline_scale` и
+  `base_weight` (`test_kan_layer_parameters_fall_back_to_adamw`), так что доля
+  Muon у KAN-LoRA в точности равна доле A и B, как у LoRA и DoRA.
 - В режиме `"adamw"` всегда ровно один оптимизатор и нулевое покрытие Muon
   (`test_adamw_mode_uses_a_single_optimizer`); в режиме `"muon"` для
   KAN-LoRA создаются оба оптимизатора (`test_muon_mode_creates_two_optimizers_when_needed`).

@@ -53,3 +53,6 @@ class DoRALinear(AdapterLinear):
 
     def merge(self) -> nn.Linear:
         return _build_merged_linear(self.base, self.effective_weight())
+
+    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
+        return (self.lora_a, self.lora_b)

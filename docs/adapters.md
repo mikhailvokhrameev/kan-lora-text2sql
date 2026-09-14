@@ -69,6 +69,12 @@ self.scaling = config.alpha / config.rank
 
 Конкретные (не переопределяемые по умолчанию) члены:
 
+- `matrix_parameters() -> tuple[nn.Parameter, ...]` — параметры, реально
+  задающие линейное отображение матричным умножением (`y = W @ x`), а не
+  любые двумерные тензоры. По умолчанию пуст. Метод объявляет этот список на
+  уровне интерфейса; `train/optimizers.py` пока не читает его — там
+  разводка параметров на Muon/AdamW всё ещё идёт по размерности тензора
+  (`split_by_dimension`, см. `docs/optimizers.md`).
 - `trainable_parameter_count() -> int` — сумма `numel()` по параметрам с
   `requires_grad=True`. Так как `self.base` заморожен в конструкторе,
   веса основы в счётчик не попадают.
@@ -275,6 +281,7 @@ delta_W * x = (alpha / r) * B (A x)
   `AdapterLinear` выше), который и создаёт новый `nn.Linear` с этим весом и
   копией `bias`. Исходный `self.base` не изменяется: слияние выполняется в
   новый объект, старый остаётся пригодным для повторного использования.
+- `matrix_parameters()` — `(self.lora_a, self.lora_b)`.
 
 Слияние (`merge`) существует потому, что LoRA — линейная поправка: после
 обучения её можно поглотить в веса и не платить дополнительной задержкой
@@ -337,6 +344,7 @@ LoRA: при `B = 0` направление `V` в точности равно `
 - `merge() -> nn.Linear` — передаёт `effective_weight()` в тот же общий
   хелпер `_build_merged_linear`, что и `LoRALinear.merge()`; исходный `base`
   не изменяется.
+- `matrix_parameters()` — `(self.lora_a, self.lora_b)`.
 
 ### Сводимость к LoRA
 
@@ -432,6 +440,15 @@ delta_W * x = (alpha / r) * B * phi(A x)
   [`latency.md`](latency.md)): KAN-LoRA всегда платит дополнительным
   проходом на инференсе, в отличие от LoRA и DoRA, которые после слияния
   не стоят ничего.
+- `matrix_parameters()` — `(self.lora_a, self.lora_b)`. Ни один параметр
+  слоя `kan` сюда не входит: `spline_coefficients` в вычисление входит не
+  матричным умножением, а `spline_scale`/`base_weight`, несмотря на
+  двумерную форму `(rank, rank)`, участвуют поэлементно
+  (`spline_scale * spline`, `base_weight` под `silu`). Это тот критерий,
+  которым `train/optimizers.py` в перспективе должен будет разводить
+  параметры между Muon и AdamW вместо текущей разводки по голой
+  размерности тензора (`split_by_dimension`, см. `docs/optimizers.md`) —
+  на момент этой правки `optimizers.py` ещё не читает `matrix_parameters()`.
 
 ## Проверенные инварианты
 

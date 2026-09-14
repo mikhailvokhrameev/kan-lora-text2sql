@@ -87,6 +87,19 @@ class AdapterLinear(nn.Module, ABC):
     def can_merge(self) -> bool:
         """Сливается ли поправка с весами основы после обучения."""
 
+    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
+        """Параметры, реально задающие линейное отображение матричным умножением.
+
+        Только они допустимы для Muon: его ортогонализация Ньютона — Шульца
+        осмысленна лишь для параметра вида y = W @ x, а не для любого
+        тензора, которому случайно досталась двумерная форма (см.
+        `KANLayer.spline_scale`/`base_weight` — это поэлементные веса на
+        сетке рёбер, а не матрица отображения). По умолчанию пуст —
+        переопределяется в LoRA, DoRA и KAN-LoRA, единственных методах, где
+        такие параметры вообще есть.
+        """
+        return ()
+
     def trainable_parameter_count(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
