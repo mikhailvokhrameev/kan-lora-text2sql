@@ -89,7 +89,7 @@ def train(
         collate_fn=collator,
         generator=torch.Generator().manual_seed(train_config.seed),
     )
-    bundle = build_optimizer(model.parameters(), optimizer_config)
+    bundle = build_optimizer(model, optimizer_config)
     tracker = PeakMemoryTracker(device)
     tracker.reset()
 
