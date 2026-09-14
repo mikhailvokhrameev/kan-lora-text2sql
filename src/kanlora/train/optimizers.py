@@ -1,20 +1,20 @@
 """AdamW и Muon за единым интерфейсом.
 
-Muon ортогонализует обновления и применим только к двумерным матрицам —
-всё остальное он отвергает жёсткой ошибкой. Поэтому три сравниваемых метода
-покрываются им по-разному: LoRA целиком (обе матрицы двумерны), DoRA частично
-(вектор модуля одномерен), KAN-LoRA частично (коэффициенты сплайнов
-трёхмерны). Непокрытые параметры идут в запасной AdamW, и прогон с Muon для
-KAN-LoRA всегда гибридный. Это самостоятельный результат работы: индуктивное
-смещение современного оптимизатора не распространяется на нелинейную часть
-адаптера.
+Muon ортогонализует направление обновления линейного отображения и
+осмыслен только для параметров, которые вычисляются как W @ x — то есть
+для настоящих матриц (`AdapterLinear.matrix_parameters()`), а не для любого
+тензора, которому случайно досталась двумерная форма. У KAN-LoRA ровно две
+таких матрицы (`lora_a`, `lora_b`) — всё остальное, включая двумерные
+`spline_scale`/`base_weight` слоя `KANLayer` (они входят в вычисление
+поэлементно, а не матричным умножением), идёт в запасной AdamW. Прогон
+KAN-LoRA с Muon поэтому всегда гибридный — это самостоятельный результат
+работы, а не техническая деталь.
 
 Оба оптимизатора видят одну скорость обучения — как и все три метода.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -22,7 +22,9 @@ import torch
 from torch import nn
 from torch.optim import Optimizer
 
-__all__ = ["OptimizerBundle", "OptimizerConfig", "build_optimizer", "split_by_dimension"]
+from kanlora.adapters.inject import adapter_modules
+
+__all__ = ["OptimizerBundle", "OptimizerConfig", "build_optimizer", "split_by_matrix_role"]
 
 
 @dataclass(frozen=True)
@@ -33,14 +35,26 @@ class OptimizerConfig:
     max_grad_norm: float = 1.0
 
 
-def split_by_dimension(
-    parameters: Iterable[nn.Parameter],
+def split_by_matrix_role(
+    model: nn.Module,
 ) -> tuple[list[nn.Parameter], list[nn.Parameter]]:
-    """Делит обучаемые параметры на двумерные и все прочие."""
-    trainable = [p for p in parameters if p.requires_grad]
+    """Делит обучаемые параметры модели на настоящие матрицы отображения и всё прочее.
+
+    «Настоящая матрица» — то, что каждый внедрённый адаптер сам называет через
+    `matrix_parameters()`, а не любой параметр с `dim() == 2`: у KAN-LoRA
+    `spline_scale` и `base_weight` тоже двумерны по форме, но участвуют в
+    вычислении поэлементно, а не как матрица `y = W @ x`, и поэтому не
+    должны считаться пригодными для ортогонализации Ньютона — Шульца.
+    """
+    matrix_ids = {
+        id(parameter)
+        for _, adapter in adapter_modules(model)
+        for parameter in adapter.matrix_parameters()
+    }
+    trainable = [p for p in model.parameters() if p.requires_grad]
     return (
-        [p for p in trainable if p.dim() == 2],
-        [p for p in trainable if p.dim() != 2],
+        [p for p in trainable if id(p) in matrix_ids],
+        [p for p in trainable if id(p) not in matrix_ids],
     )
 
 
@@ -68,23 +82,21 @@ class OptimizerBundle:
         return {name: sum(p.numel() for p in group) for name, group in self._groups.items()}
 
 
-def build_optimizer(
-    parameters: Iterable[nn.Parameter], config: OptimizerConfig
-) -> OptimizerBundle:
+def build_optimizer(model: nn.Module, config: OptimizerConfig) -> OptimizerBundle:
     builders = {"adamw": _build_adamw, "muon": _build_muon}
-    return builders[config.name](list(parameters), config)
+    return builders[config.name](model, config)
 
 
-def _build_adamw(parameters: list[nn.Parameter], config: OptimizerConfig) -> OptimizerBundle:
-    trainable = [p for p in parameters if p.requires_grad]
+def _build_adamw(model: nn.Module, config: OptimizerConfig) -> OptimizerBundle:
+    trainable = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
         trainable, lr=config.learning_rate, weight_decay=config.weight_decay
     )
     return OptimizerBundle([optimizer], {"adamw": trainable, "muon": []})
 
 
-def _build_muon(parameters: list[nn.Parameter], config: OptimizerConfig) -> OptimizerBundle:
-    matrices, rest = split_by_dimension(parameters)
+def _build_muon(model: nn.Module, config: OptimizerConfig) -> OptimizerBundle:
+    matrices, rest = split_by_matrix_role(model)
 
     optimizers: list[Optimizer] = []
     if matrices:

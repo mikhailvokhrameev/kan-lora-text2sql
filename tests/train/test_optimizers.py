@@ -1,9 +1,10 @@
 """Проверки разводки параметров по оптимизаторам.
 
-Muon принимает только двумерные параметры и отвергает остальные жёсткой
-ошибкой. Отсюда разное покрытие у трёх методов — это результат работы, а не
-техническая деталь, поэтому разводка проверяется поимённо: ни один параметр
-не потерян и ни один не продублирован.
+Muon принимает только настоящие матрицы линейного отображения
+(`AdapterLinear.matrix_parameters()`), а не любой двумерный тензор, и
+отвергает остальное жёсткой ошибкой. Отсюда разное покрытие у трёх методов —
+это результат работы, а не техническая деталь, поэтому разводка проверяется
+поимённо: ни один параметр не потерян и не продублирован.
 """
 
 import pytest
@@ -14,7 +15,7 @@ from kanlora.adapters.base import AdapterConfig
 from kanlora.adapters.dora import DoRALinear
 from kanlora.adapters.kan_lora import KANLoRALinear
 from kanlora.adapters.lora import LoRALinear
-from kanlora.train.optimizers import OptimizerConfig, build_optimizer, split_by_dimension
+from kanlora.train.optimizers import OptimizerConfig, build_optimizer, split_by_matrix_role
 
 IN_FEATURES, OUT_FEATURES, RANK = 12, 7, 4
 
@@ -34,62 +35,70 @@ def adapter(request):
 
 
 def test_split_loses_and_duplicates_nothing(adapter) -> None:
-    parameters = trainable(adapter)
-    two_dimensional, other = split_by_dimension(parameters)
+    matrices, other = split_by_matrix_role(adapter)
 
-    identifiers = [id(p) for p in two_dimensional + other]
-    assert sorted(identifiers) == sorted(id(p) for p in parameters)
+    identifiers = [id(p) for p in matrices + other]
+    assert sorted(identifiers) == sorted(id(p) for p in trainable(adapter))
     assert len(identifiers) == len(set(identifiers))
 
 
-def test_split_puts_only_matrices_in_the_first_group(adapter) -> None:
-    two_dimensional, other = split_by_dimension(trainable(adapter))
-    assert all(p.dim() == 2 for p in two_dimensional)
-    assert all(p.dim() != 2 for p in other)
+def test_split_puts_only_declared_matrix_parameters_in_the_first_group(adapter) -> None:
+    matrices, other = split_by_matrix_role(adapter)
+    matrix_ids = {id(p) for p in adapter.matrix_parameters()}
+
+    assert {id(p) for p in matrices} == matrix_ids
+    assert all(id(p) not in matrix_ids for p in other)
 
 
 def test_lora_is_fully_covered_by_muon() -> None:
-    """Обе матрицы LoRA двумерны — Muon покрывает метод целиком."""
+    """Обе матрицы LoRA — настоящие матрицы отображения, Muon покрывает метод целиком."""
     adapter = LoRALinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig(rank=RANK))
-    bundle = build_optimizer(trainable(adapter), OptimizerConfig(name="muon"))
+    coverage = build_optimizer(adapter, OptimizerConfig(name="muon")).coverage()
 
-    coverage = bundle.coverage()
     assert coverage["muon"] == RANK * (IN_FEATURES + OUT_FEATURES)
     assert coverage["adamw"] == 0
 
 
 def test_dora_magnitude_falls_back_to_adamw() -> None:
-    """Вектор модуля одномерен, Muon его не принимает."""
+    """Вектор модуля одномерен и не задаёт линейного отображения — Muon его не примет."""
     adapter = DoRALinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig(rank=RANK))
-    coverage = build_optimizer(trainable(adapter), OptimizerConfig(name="muon")).coverage()
+    coverage = build_optimizer(adapter, OptimizerConfig(name="muon")).coverage()
     assert coverage["adamw"] == OUT_FEATURES
 
 
-def test_kan_spline_coefficients_fall_back_to_adamw() -> None:
-    """Коэффициенты сплайнов трёхмерны: индуктивное смещение Muon их не покрывает."""
+def test_kan_layer_parameters_fall_back_to_adamw() -> None:
+    """Весь слой `kan` идёт в AdamW — включая двумерные `spline_scale`/`base_weight`.
+
+    Они входят в вычисление поэлементно (`spline_scale * spline`), а не как
+    матрица `y = W @ x`, и поэтому не входят в `matrix_parameters()`. Доля
+    Muon у KAN-LoRA в точности равна доле A и B — той же, что и у LoRA/DoRA,
+    а не большей, как было при разводке по голой двумерности тензора.
+    """
     adapter = KANLoRALinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig(rank=RANK))
-    coverage = build_optimizer(trainable(adapter), OptimizerConfig(name="muon")).coverage()
+    coverage = build_optimizer(adapter, OptimizerConfig(name="muon")).coverage()
 
     basis = adapter.config.grid_size + adapter.config.spline_order
-    assert coverage["adamw"] == RANK * RANK * basis + RANK
+    kan_layer_parameters = RANK * RANK * (basis + 2) + RANK
+    assert coverage["adamw"] == kan_layer_parameters
+    assert coverage["muon"] == RANK * (IN_FEATURES + OUT_FEATURES)
 
 
 def test_adamw_mode_uses_a_single_optimizer(adapter) -> None:
-    bundle = build_optimizer(trainable(adapter), OptimizerConfig(name="adamw"))
+    bundle = build_optimizer(adapter, OptimizerConfig(name="adamw"))
     assert len(bundle.optimizers) == 1
     assert bundle.coverage()["muon"] == 0
 
 
 def test_muon_mode_creates_two_optimizers_when_needed() -> None:
     adapter = KANLoRALinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig(rank=RANK))
-    bundle = build_optimizer(trainable(adapter), OptimizerConfig(name="muon"))
+    bundle = build_optimizer(adapter, OptimizerConfig(name="muon"))
     assert len(bundle.optimizers) == 2
 
 
 def test_step_changes_every_trainable_parameter(adapter) -> None:
     """Разводка обязана двигать всё: параметр без оптимизатора остался бы мёртвым."""
     parameters = trainable(adapter)
-    bundle = build_optimizer(parameters, OptimizerConfig(name="muon", learning_rate=0.1))
+    bundle = build_optimizer(adapter, OptimizerConfig(name="muon", learning_rate=0.1))
 
     for parameter in parameters:
         parameter.grad = torch.ones_like(parameter)
@@ -102,7 +111,7 @@ def test_step_changes_every_trainable_parameter(adapter) -> None:
 
 def test_clipping_bounds_the_gradient_norm(adapter) -> None:
     parameters = trainable(adapter)
-    bundle = build_optimizer(parameters, OptimizerConfig())
+    bundle = build_optimizer(adapter, OptimizerConfig())
     for parameter in parameters:
         parameter.grad = torch.full_like(parameter, 100.0)
 
@@ -113,7 +122,7 @@ def test_clipping_bounds_the_gradient_norm(adapter) -> None:
 
 def test_zero_grad_clears_gradients(adapter) -> None:
     parameters = trainable(adapter)
-    bundle = build_optimizer(parameters, OptimizerConfig())
+    bundle = build_optimizer(adapter, OptimizerConfig())
     for parameter in parameters:
         parameter.grad = torch.ones_like(parameter)
 
@@ -123,4 +132,4 @@ def test_zero_grad_clears_gradients(adapter) -> None:
 
 def test_unknown_optimizer_is_rejected(adapter) -> None:
     with pytest.raises(KeyError):
-        build_optimizer(trainable(adapter), OptimizerConfig(name="lion"))
+        build_optimizer(adapter, OptimizerConfig(name="lion"))
