@@ -74,3 +74,8 @@ def test_interface_cannot_be_instantiated_directly() -> None:
 def test_default_last_fraction_inside_grid_is_none(adapter: ConstantAdapter) -> None:
     """Линейные адаптеры не ведут статистику сетки — цикл обучения не обязан о них знать."""
     assert adapter.last_fraction_inside_grid() is None
+
+
+def test_default_matrix_parameters_is_empty(adapter: ConstantAdapter) -> None:
+    """Muon получает только настоящие матрицы отображения — по умолчанию их нет."""
+    assert adapter.matrix_parameters() == ()

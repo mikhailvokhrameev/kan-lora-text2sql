@@ -178,3 +178,8 @@ def test_observed_range_expands_after_forward_pass(adapter: KANLoRALinear) -> No
     second_lo, second_hi = adapter.observed_range()
     assert second_lo <= first_lo
     assert second_hi >= first_hi
+
+
+def test_matrix_parameters_are_lora_a_and_lora_b(adapter: KANLoRALinear) -> None:
+    """Ни один параметр слоя `kan` сюда не входит — все они поэлементные, не матрицы."""
+    assert adapter.matrix_parameters() == (adapter.lora_a, adapter.lora_b)

@@ -90,3 +90,6 @@ class KANLoRALinear(AdapterLinear):
     @property
     def can_merge(self) -> bool:
         return False
+
+    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
+        return (self.lora_a, self.lora_b)
