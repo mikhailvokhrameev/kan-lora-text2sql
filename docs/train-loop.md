@@ -100,8 +100,13 @@ def train(model, dataset, collator, optimizer_config, train_config, device) -> T
    — чекпоинтинг несовместим с кешем ключей/значений при обучении.
 3. `DataLoader` с перемешиванием, детерминированным по тому же `seed`, и
    `collate_fn=collator`.
-4. `build_optimizer` собирает `OptimizerBundle` по `optimizer_config`;
-   `PeakMemoryTracker.reset()` — до первого шага.
+4. `build_optimizer(model, optimizer_config)` собирает `OptimizerBundle`.
+   Ему передаётся сама модель, а не плоский список параметров
+   (`model.parameters()`) — `build_optimizer` внутри вызывает
+   `split_by_matrix_role(model)`, которой нужен обход `model.named_modules()`,
+   чтобы найти внедрённые адаптеры и развести Muon/AdamW по их
+   `matrix_parameters()` (см. `docs/optimizers.md`). `PeakMemoryTracker.reset()`
+   — до первого шага.
 5. Основной цикл по эпохам и батчам: функция потерь модели делится на
    `train_config.gradient_accumulation` перед `backward()`, поэтому шаг
    оптимизатора эквивалентен обучению батчем в `gradient_accumulation` раз
