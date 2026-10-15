@@ -3,8 +3,9 @@
 Один цикл на LoRA, DoRA и KAN-LoRA — по той же причине, что и один внедритель:
 различие в коде обучения просочилось бы в сравнение методов, не выдав ошибки.
 
-Накопление градиента делит функцию потерь на число накоплений, поэтому шаг
-эквивалентен обучению большим батчем.
+Накопление градиента делит функцию потерь на число батчей в группе
+накопления, поэтому шаг эквивалентен обучению большим батчем — в том числе на
+неполной последней группе эпохи, которая делится на свою фактическую длину.
 
 Валидационная функция потерь (учебник §3.7; лекция 5 MLOps — «val loss на
 шаге 0») считается до первого шага и в конце каждой эпохи на примерах train,
@@ -70,6 +71,16 @@ def _mean_fraction_inside_grid(model: torch.nn.Module) -> float | None:
     values = [module.mean_fraction_inside_grid() for _, module in adapter_modules(model)]
     present = [value for value in values if value is not None]
     return sum(present) / len(present) if present else None
+
+
+def _group_size(index: int, batches: int, accumulation: int) -> int:
+    """Число батчей в группе накопления, куда входит батч `index` (с 1).
+
+    Последняя группа эпохи бывает неполной: деление её на `accumulation`
+    занизило бы градиент последнего шага в `accumulation / хвост` раз.
+    """
+    full = batches - batches % accumulation
+    return accumulation if index <= full else batches - full
 
 
 @torch.no_grad()
@@ -156,7 +167,7 @@ def train(
         for index, batch in enumerate(loader, start=1):
             batch = {key: value.to(device) for key, value in batch.items()}
             loss = model(**batch).loss
-            (loss / train_config.gradient_accumulation).backward()
+            (loss / _group_size(index, len(loader), train_config.gradient_accumulation)).backward()
 
             step_loss = loss.item()
             epoch_total += step_loss

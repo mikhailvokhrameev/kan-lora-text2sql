@@ -126,13 +126,18 @@ def train(model, dataset, collator, optimizer_config, train_config, device,
    чтобы найти внедрённые адаптеры и развести Muon/AdamW по их
    `matrix_parameters()` (см. `docs/optimizers.md`). `PeakMemoryTracker.reset()`
    — до первого шага.
-5. Основной цикл по эпохам и батчам: функция потерь модели делится на
-   `train_config.gradient_accumulation` перед `backward()`, поэтому шаг
-   оптимизатора эквивалентен обучению батчем в `gradient_accumulation` раз
+5. Основной цикл по эпохам и батчам: функция потерь модели делится на число
+   батчей в её группе накопления (`_group_size`) перед `backward()`, поэтому
+   шаг оптимизатора эквивалентен обучению батчем в `gradient_accumulation` раз
    больше. Шаг (`clip_grad_norm_` → `step()` → `zero_grad()`) выполняется
    каждые `gradient_accumulation` батчей и дополнительно на последнем батче
    неполного хвоста эпохи (`index == len(loader)`), чтобы накопленный градиент
-   неполной группы не терялся. Каждые `train_config.log_every` шагов (по
+   неполной группы не терялся. Хвост делится на свою фактическую длину, а не на
+   `gradient_accumulation`: иначе последний шаг эпохи получал бы градиент,
+   заниженный в `gradient_accumulation / длина хвоста` раз
+   (`test_incomplete_accumulation_group_is_divided_by_its_actual_size`). При
+   2500 примерах и `gradient_accumulation=8` хвост — 4 батча, то есть раньше
+   последний шаг каждой эпохи делался с вдвое меньшим градиентом. Каждые `train_config.log_every` шагов (по
    номеру батча внутри эпохи, `index % log_every == 0`) печатается отдельная
    строка с номером шага и текущей функцией потерь батча — независимо от
    печати по итогам эпохи (см. ниже) и независимо от того, кратен ли шаг

@@ -370,3 +370,30 @@ def test_report_records_gradient_norm_before_clipping(tiny_causal_lm) -> None:
     # 5 батчей на эпоху, группы по 2: шаги после 2-го, 4-го и 5-го батча.
     assert len(report.grad_norms) == 2 * 3
     assert all(norm > 1e-6 for norm in report.grad_norms)
+
+
+def test_incomplete_accumulation_group_is_divided_by_its_actual_size(tiny_causal_lm) -> None:
+    """Хвост эпохи короче gradient_accumulation: делить надо на его длину, а не на 8.
+
+    5 батчей при gradient_accumulation=8 — одна неполная группа из 5. Её градиент
+    обязан совпасть с градиентом одного батча из тех же 20 примеров; деление на 8
+    занизило бы его в 8/5 раза.
+    """
+    reference = copy.deepcopy(tiny_causal_lm)
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+    inject_adapters(reference, "lora", AdapterConfig(rank=4))
+    reference.load_state_dict(tiny_causal_lm.state_dict())
+
+    common = {
+        "dataset": twenty_examples(),
+        "collator": Collator(pad_token_id=0),
+        "optimizer_config": OptimizerConfig(learning_rate=0.01),
+        "device": DEVICE,
+    }
+    whole = train(model=tiny_causal_lm, train_config=TrainConfig(
+        epochs=1, batch_size=20, gradient_accumulation=1, gradient_checkpointing=False), **common)
+    tail = train(model=reference, train_config=TrainConfig(
+        epochs=1, batch_size=4, gradient_accumulation=8, gradient_checkpointing=False), **common)
+
+    assert len(tail.grad_norms) == 1
+    assert tail.grad_norms[0] == pytest.approx(whole.grad_norms[0], rel=1e-4)
