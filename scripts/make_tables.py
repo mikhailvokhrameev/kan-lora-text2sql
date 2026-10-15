@@ -34,7 +34,12 @@ def load_cards(directory: Path) -> list[dict]:
     ]
 
 
-CellKey = tuple[str, str, str, bool]
+CellKey = tuple[str, str, str | None, bool | None]
+
+# Базовая модель без адаптера (`method: none`): обучения не было, оптимизатора
+# и масштаба входа у неё нет.
+BASELINE = "none"
+BASELINE_LABEL = "без адаптера (базовый уровень)"
 
 # Значения конфигурации по умолчанию (configs/base.yaml): ими читаются старые карточки,
 # в которых этих полей ещё не было.
@@ -48,7 +53,11 @@ def cell_key(card: dict) -> CellKey:
     Прогоны с Muon и абляция без обучаемого масштаба входа — другие эксперименты,
     их нельзя усреднять с основным. learn_input_scale различает только KAN-LoRA
     (как и run_id): у LoRA/DoRA поле не используется и ключ не расщепляет.
+    У базовой модели без адаптера ключ — (none, набор, None, None): секция
+    optimizer её замороженной конфигурации не подхватывается, обучения не было.
     """
+    if card["method"] == BASELINE:
+        return (BASELINE, card["dataset"], None, None)
     config = card.get("config") or {}
     optimizer = (
         card.get("optimizer") or (config.get("optimizer") or {}).get("name") or DEFAULT_OPTIMIZER
@@ -75,8 +84,8 @@ def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
         key = cell_key(card)
         for metric in METRICS:
             buckets[key][metric].append(card["metrics"].get(metric))
-        buckets[key]["peak_memory_bytes"].append(card["peak_memory_bytes"])
-        buckets[key]["trainable_parameters"].append(card["trainable_parameters"])
+        buckets[key]["peak_memory_bytes"].append(card.get("peak_memory_bytes"))
+        buckets[key]["trainable_parameters"].append(card.get("trainable_parameters"))
 
     aggregated: dict[CellKey, dict] = {}
     for key, metrics in buckets.items():
@@ -98,21 +107,42 @@ def _cell(value: tuple[float, float] | None, digits: int = 4) -> str:
     return f"{mean:.{digits}f} ± {spread / 2:.{digits}f}"
 
 
+def _row_order(key: CellKey) -> tuple:
+    """Базовый уровень — первыми строками, затем методы в прежнем порядке."""
+    method, dataset, optimizer, learn_input_scale = key
+    return (method != BASELINE, method, dataset, optimizer or "", bool(learn_input_scale))
+
+
 def main_table(cards: list[dict]) -> str:
+    """Основная матрица; строки базового уровня собираются из карточек `method: none`.
+
+    Пока такой карточки нет, на месте базового уровня стоит строка «нет прогона»:
+    без этой точки таблица не говорит, дало ли дообучение что-то вообще.
+    """
     aggregated = aggregate(cards)
     lines = [
         "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров |",
         "|---|---|---|---|---|---|---|",
-        "| без адаптера (базовый уровень) | — | — | заполнить прогоном базовой модели | | | 0 |",
     ]
-    for (method, dataset, optimizer, learn_input_scale), summary in sorted(aggregated.items()):
-        label = method if learn_input_scale else f"{method} (без масштаба входа)"
+    if not any(key[0] == BASELINE for key in aggregated):
+        lines.append(f"| {BASELINE_LABEL} | — | — | нет прогона | нет прогона | — | — |")
+    for key in sorted(aggregated, key=_row_order):
+        method, dataset, optimizer, learn_input_scale = key
+        summary = aggregated[key]
+        if method == BASELINE:
+            label = BASELINE_LABEL
+        else:
+            label = method if learn_input_scale else f"{method} (без масштаба входа)"
         memory = summary["peak_memory_bytes"]
         parameters = summary["trainable_parameters"]
+        # У базового уровня обучения не было: пика видеопамяти обучения и
+        # обучаемых параметров нет (null в карточке), в таблице — прочерк.
+        memory_cell = f"{memory[0] / 2**30:.2f}" if memory is not None else "—"
+        parameters_cell = f"{int(parameters[0])}" if parameters is not None else "—"
         lines.append(
-            f"| {label} | {optimizer} | {dataset} "
+            f"| {label} | {optimizer or '—'} | {dataset} "
             f"| {_cell(summary['exact_match'])} | {_cell(summary['execution_accuracy'])} "
-            f"| {memory[0] / 2**30:.2f} | {int(parameters[0])} |"
+            f"| {memory_cell} | {parameters_cell} |"
         )
     return "\n".join(lines)
 
@@ -142,6 +172,8 @@ def optimizer_table(cards: list[dict]) -> str:
     """Покрытие параметров оптимизатором Muon — самостоятельный результат работы."""
     lines = ["| Прогон | Параметров в Muon | Параметров в AdamW | Доля в Muon |", "|---|---|---|---|"]
     for card in sorted(cards, key=lambda item: item["run_id"]):
+        if card["method"] == BASELINE:
+            continue  # без обучения оптимизатора нет
         coverage = card.get("optimizer_coverage") or {}
         muon, adamw = coverage.get("muon", 0), coverage.get("adamw", 0)
         total = muon + adamw

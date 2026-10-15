@@ -27,8 +27,8 @@ def load_cards(directory: Path) -> list[dict]
 ## `aggregate`
 
 ```python
-def cell_key(card: dict) -> tuple[str, str, str, bool]
-def aggregate(cards: list[dict]) -> dict[tuple[str, str, str, bool], dict[str, tuple[float, float] | None]]
+def cell_key(card: dict) -> tuple[str, str, str | None, bool | None]
+def aggregate(cards: list[dict]) -> dict[tuple[str, str, str | None, bool | None], dict[str, tuple[float, float] | None]]
 ```
 
 Группирует карточки по ключу `(method, dataset, optimizer, learn_input_scale)`
@@ -42,6 +42,13 @@ def aggregate(cards: list[dict]) -> dict[tuple[str, str, str, bool], dict[str, t
 `kan_lora` (так же, как суффикс `-no-input-scale` в `run_id`,
 `config.py`): у LoRA и DoRA поле не используется, и для них в ключе всегда
 значение по умолчанию.
+
+У базовой модели без адаптера (`method: none`, `docs/experiment-runner.md`)
+ключ — `("none", dataset, None, None)`: обучения не было, оптимизатора и
+масштаба входа нет. Этот случай разбирается первым, до чтения
+`config.optimizer.name`, — иначе секция `optimizer`, которая в замороженной
+конфигурации базовой модели всё равно есть, подставила бы `adamw`
+(`test_baseline_cell_key_has_no_optimizer_and_no_input_scale`).
 
 Значения читаются из карточки: оптимизатор — из `optimizer`, затем из
 `config.optimizer.name`; `learn_input_scale` — из `config.adapter`. Старые
@@ -67,7 +74,9 @@ Exact Match — порядка одного-двух процентов, то е
 Помимо метрик (`exact_match`, `execution_accuracy`) в тот же агрегат
 попадают `peak_memory_bytes` и `trainable_parameters` — они нужны основной
 таблице, а по построению карточки одинаковы для всех зёрен одного метода на
-одном наборе, поэтому их среднее и размах не публикуются отдельно.
+одном наборе, поэтому их среднее и размах не публикуются отдельно. У
+карточек `method: none` оба поля `null` и, как и отсутствующая метрика,
+дают `None` для всего ключа (поля читаются через `card.get`).
 
 ## `main_table`
 
@@ -76,8 +85,9 @@ def main_table(cards: list[dict]) -> str
 ```
 
 Строит таблицу Markdown: одна строка на ключ агрегации
-`(метод, набор, оптимизатор, learn_input_scale)`, отсортированную
-лексикографически. Столбцы: метод, оптимизатор, набор и далее метрики.
+`(метод, набор, оптимизатор, learn_input_scale)`. Строки базового уровня
+(`method: none`) идут первыми, остальные — лексикографически по ключу, как
+и раньше (`_row_order`). Столбцы: метод, оптимизатор, набор и далее метрики.
 У абляции без обучаемого масштаба входа подпись метода получает суффикс
 «(без масштаба входа)». Метод, оптимизатор и набор выводятся значениями
 конфигурации (`lora`, `dora`, `kan_lora`, `adamw`, `muon`, `spider`, `pauq`)
@@ -86,13 +96,20 @@ def main_table(cards: list[dict]) -> str
 карточек, и не вносит собственного словаря соответствий, который расходился
 бы с конфигурацией при добавлении нового метода.
 
-Первая строка таблицы — плейсхолдер «без адаптера (базовый уровень)» с
-текстом-заглушкой вместо чисел. Он обязателен методологически: без строки
+Строка «без адаптера (базовый уровень)» обязательна методологически: без
 базового уровня (модель без адаптера) невозможно ответить на вопрос «что
 дала адаптация вообще», а не только «какой из трёх методов адаптации
-лучше». Скрипт не заполняет эту строку сам — карточка результата для
-базовой модели пока не производится ни одним прогоном, — а оставляет её
-как обязательное место для заполнения в тексте работы.
+лучше». Она собирается из карточек `method: none`
+(`scripts/run_experiment.py --method none`) так же, как строки методов, —
+по одной на набор, со средним и размахом по зёрнам, если базовая модель
+прогонялась с несколькими зёрнами (генерация жадная, так что размах
+ожидается нулевым). Столбец оптимизатора — «—»; пик видеопамяти и число
+обучаемых параметров в карточке `null` (обучения не было) и в таблице тоже
+«—» (`test_baseline_row_is_filled_from_cards`,
+`test_baseline_rows_per_dataset`). Пока ни одной карточки `method: none`
+нет, на этом месте стоит строка «без адаптера (базовый уровень) | — | — |
+нет прогона | нет прогона | — | —», чтобы пропуск базовой точки был виден
+в таблице (`test_main_table_includes_the_baseline_row_placeholder`).
 
 Каждая ячейка метрики выводится функцией `_cell` в виде `среднее ± размах/2`
 (например, `0.4200 ± 0.0200`) или строкой «не измерялась», если для этой
@@ -127,6 +144,13 @@ DoRA — они не нелинейны, поле равно `null`) пропу�
 отсутствующей метрики в основной таблице. Покрывают это
 `test_nonlinearity_table_skips_unmeasured_adapters` и
 `test_nonlinearity_table_marks_run_with_nothing_measured`.
+
+Карточки базовой модели (`method: none`) в обе таблицы не попадают: у них
+нет `spline_stats` (как у LoRA/DoRA) и нет оптимизатора — `optimizer_table`
+пропускает их явно, а не выводит строкой нулей
+(`test_baseline_is_absent_from_the_optimizer_and_nonlinearity_tables`).
+График `plot_fraction_inside_grid` пропускает их, потому что
+`fraction_inside_grid` у них `null` (`test_plot_tolerates_baseline_cards`).
 
 `optimizer_table` берёт `optimizer_coverage` карточки — распределение
 обучаемых параметров между `torch.optim.AdamW` и `torch.optim.Muon`
@@ -205,8 +229,15 @@ def main() -> int
 - `main_table` показывает размах рядом со средним (символ `±`), включает
   обе сравниваемые в тесте строки (метод, набор) и является таблицей Markdown,
   а не текстом без разметки (`test_main_table_shows_spread_next_to_the_mean`),
-  и всегда содержит строку-плейсхолдер базового уровня без адаптера
-  (`test_main_table_includes_the_baseline_row_placeholder`).
+  и всегда содержит строку базового уровня без адаптера: из карточек
+  `method: none`, если они есть, иначе строку «нет прогона»
+  (`test_main_table_includes_the_baseline_row_placeholder`,
+  `test_baseline_row_is_filled_from_cards`, `test_baseline_rows_per_dataset`).
+- Ключ агрегации базовой модели — `(none, набор, None, None)`, её карточки не
+  попадают в таблицы нелинейности и покрытия Muon, а график их переносит
+  (`test_baseline_cell_key_has_no_optimizer_and_no_input_scale`,
+  `test_baseline_is_absent_from_the_optimizer_and_nonlinearity_tables`,
+  `test_plot_tolerates_baseline_cards`).
 - `optimizer_table` показывает покрытие и Muon, и AdamW
   (`test_optimizer_table_shows_muon_coverage`).
 - `plot_fraction_inside_grid` создаёт непустой файл графика
@@ -214,10 +245,8 @@ def main() -> int
 
 ## Не реализовано
 
-Строка «без адаптера (базовый уровень)» в основной таблице всегда
-плейсхолдер — прогон базовой модели без адаптера (нужен, чтобы показать
-эффект адаптации как таковой, а не только различие между тремя методами
-адаптации) отдельным типом карточки не производится. Замер фактического
+Карточки базовой модели без адаптера (`method: none`) код уже производит,
+но сами прогоны базовой модели на Spider и PAUQ ещё не выполнены. Замер фактического
 времени прогона и запуск полной матрицы экспериментов на GTX 1080 Ti (задача
 19 плана) — ещё не сделаны; до них `results/*.json` пусты и
 `python scripts/make_tables.py` возвращает код 1.

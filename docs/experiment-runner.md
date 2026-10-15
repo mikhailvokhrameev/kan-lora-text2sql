@@ -54,6 +54,30 @@ class ExperimentConfig:
 зёрен обучения — иначе разница в качестве между методами частично
 объяснялась бы разными обучающими данными, а не самим методом.
 
+### `method` и базовая модель без адаптера (`none`)
+
+Допустимые методы перечислены в `METHODS = ("none", "lora", "dora",
+"kan_lora")` (`config.py`); любое другое значение `method` роняет
+`ValueError` уже при создании `ExperimentConfig` (`__post_init__`), так что
+опечатка в YAML или в `--method` не доходит до загрузки модели. Тот же
+кортеж задаёт `choices` ключа `--method` в `scripts/run_experiment.py`.
+
+`method: none` — базовая точка: Qwen2.5-Coder-Instruct без адаптера,
+zero-shot. Адаптеры не внедряются, обучения нет, только оценка. Без этой
+точки таблица не показывает, дало ли дообучение что-то вообще. Оценка идёт
+тем же путём, что и у обученных методов: промпты строит `build_prompts`
+(шаблон диалога токенизатора, `docs/collate.md`), генерирует `generate_sql`
+с тем же правилом усечения промпта и тем же `max_new_tokens`, ответ
+нормализует `normalize_sql`, Exact Match и Execution Accuracy считаются теми
+же функциями. Отдельных настроек для базовой модели нет: она запускается с
+той же конфигурацией (`configs/base.yaml` или `configs/smoke.yaml`), секции
+`adapter`, `train` и `optimizer` при этом просто не используются.
+
+Instruct-модель без дообучения обычно отвечает пояснением и SQL в
+Markdown-блоке ` ```sql `; из такого ответа `normalize_sql` берёт содержимое
+первого блока — правило протокола оценки, общее для всех методов
+(`docs/generate.md`, «Извлечение SQL из Markdown-блока»).
+
 ### `run_id`
 
 ```python
@@ -66,6 +90,11 @@ def run_id(self) -> str:
 и обязано различать все ячейки матрицы экспериментов: 3 метода × 2 набора ×
 3 зерна × (обычно один оптимизатор, но `optimizer.name` в имени на случай
 прогонов с `Muon`) = как минимум 18 разных строк, без коллизий.
+
+У базовой модели без адаптера имя `none-{dataset}-seed{seed}`, например
+`none-spider-seed0`: оптимизатора у прогона без обучения нет, и
+`learn_input_scale` имя не меняет. Генерация жадная, поэтому зерно на
+результат базовой модели не влияет; одного прогона на набор достаточно.
 
 Абляционный режим (`adapter.learn_input_scale is False`, только для
 `kan_lora`, см. `docs/adapters.md`) добавляет суффикс `-no-input-scale` —
@@ -153,6 +182,20 @@ def build_result_card(config, injection, train_report, metrics, spline_stats) ->
 Execution Accuracy; `spline_stats` — сводка `model_nonlinearity`
 (`docs/nonlinearity.md`) или `None` для линейных методов.
 
+Для `method: none` вызывается с `train_report=None` и
+`injection={"trainable_parameters": None, "total_parameters": <число
+параметров модели>, "replaced": []}`. Тогда в карточке `null`: `optimizer`
+(хотя замороженная `config` по-прежнему содержит секцию `optimizer` из
+YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
+видеопамяти — величина обучения, на оценке не замеряется),
+`optimizer_coverage`, `step_losses`, `epoch_losses`,
+`fraction_inside_grid`, `spline_stats`; `adapted_modules` равно 0,
+`metrics.truncated_prompts` — `null` (обучающая выборка не кодируется).
+`null` здесь значит «не применимо: не обучалась», а не ноль — по тому же
+принципу, что и для Execution Accuracy ниже. Читатели карточек это
+переносят: `scripts/make_tables.py` показывает прочерк
+(`docs/make-tables.md`).
+
 Карточка несёт из `train_report` оба ряда функции потерь: `step_losses` —
 значение на каждом шаге оптимизатора (после накопления градиента), и
 `epoch_losses` — среднее за эпоху. Без `step_losses` в карточке нельзя
@@ -196,13 +239,22 @@ def write_result_card(card: dict, directory: Path) -> Path
    dtype=torch.float32)`) — сравнение по видеопамяти между методами
    осмысленно только при одинаковой точности (см. «Global Constraints»
    плана), а не потому что fp32 быстрее или удобнее.
-5. `inject_adapters` подменяет семь целевых проекций и печатает число
-   обучаемых параметров и число затронутых слоёв — первая проверка
-   правдоподобия результата ещё до начала обучения.
-6. `build_dataset` кодирует обучающую выборку и сообщает число усечённых
-   промптов; при усечении печатается предупреждение — большая доля
-   усечений искажает метрику сильнее, чем сам метод адаптации.
-7. `train()` (`docs/train-loop.md`) обучает модель и возвращает `TrainReport`.
+5–7. Шаги адаптации и обучения собраны в `adapt_and_train(config, model,
+   tokenizer, train_examples, schemas, device)`, которая возвращает
+   `(injection, report, truncated)`:
+   - `inject_adapters` подменяет семь целевых проекций и печатает число
+     обучаемых параметров и число затронутых слоёв — первая проверка
+     правдоподобия результата ещё до начала обучения;
+   - `build_dataset` кодирует обучающую выборку и сообщает число усечённых
+     промптов; при усечении печатается предупреждение — большая доля
+     усечений искажает метрику сильнее, чем сам метод адаптации;
+   - `train()` (`docs/train-loop.md`) обучает модель и возвращает
+     `TrainReport`.
+
+   Для `method: none` функция ничего из этого не делает: печатает число
+   параметров модели и возвращает `({"trainable_parameters": None,
+   "total_parameters": N, "replaced": []}, None, None)`. Обучающая выборка
+   для базовой модели не читается (шаг 3 загружает только отложенную).
 8. `generate_sql` (`docs/generate.md`) генерирует ответы на отложенной
    выборке, усекая промпты до `config.max_length - config.max_new_tokens`
    по тому же правилу, что и `build_dataset` при обучении; Exact Match считается официальной метрикой Spider
@@ -225,9 +277,17 @@ def write_result_card(card: dict, directory: Path) -> Path
     пустое поле, которое пришлось бы отдельно проверять при сборке таблиц.
 11. `build_result_card` и `write_result_card` в каталог `--output`
     (по умолчанию `results/`), затем печать итоговых метрик, пиковой
-    видеопамяти в ГиБ и пути к карточке.
+    видеопамяти в ГиБ и времени обучения (для `method: none` — только
+    метрик) и пути к карточке.
 
-Скрипт не покрыт модульными тестами — он оркестрирует уже протестированные
+Запуск базовой точки:
+
+```bash
+python scripts/run_experiment.py --config configs/base.yaml --method none --dataset spider
+python scripts/run_experiment.py --config configs/base.yaml --method none --dataset pauq
+```
+
+Сквозной путь скрипта модульными тестами не покрыт — он оркестрирует уже протестированные
 по отдельности модули (данные, адаптеры, обучение, генерация, оценка,
 анализ нелинейности) и требует настоящей модели `Qwen2.5-Coder-0.5B-Instruct`
 и распакованных наборов Spider/PAUQ на диске (`scripts/check_environment.py`,
@@ -268,6 +328,17 @@ Muon/AdamW по роли параметра (`matrix_parameters()`, `docs/optimi
   (`test_train_seed_follows_the_run_seed`).
 - `run_id` различает метод, набор, оптимизатор, зерно и абляционный режим
   (`test_run_id_encodes_the_whole_experiment_cell`).
+- `none` входит в `METHODS`, `run_id` базовой модели —
+  `none-{dataset}-seed{seed}` без оптимизатора и без суффикса абляции
+  (`test_baseline_method_none_is_a_valid_method`,
+  `test_baseline_run_id_does_not_name_an_optimizer`); неизвестный метод
+  роняет `ValueError` (`test_unknown_method_is_rejected`).
+- Карточка базовой модели пишет `null` в `optimizer` и во все поля обучения,
+  `adapted_modules` — 0 (`test_baseline_card_leaves_training_fields_null`).
+- `--method none` принимается командной строкой, а `adapt_and_train` для
+  него не вызывает `inject_adapters`, `build_dataset` и `train` и не меняет
+  веса модели (`tests/test_run_experiment.py`: заглушки этих функций
+  падают при вызове, проверка на `tiny_causal_lm` без сети).
 - Конфигурация переживает сериализацию в YAML и обратно без потерь
   (`test_serialization_round_trips`).
 - `smoke.yaml` отличается от `base.yaml` только размерами выборки и числом

@@ -1,6 +1,9 @@
 # scripts/run_experiment.py
 """Один прогон целиком: обучение -> оценка -> карточка результата.
 
+`--method none` — базовая модель без адаптера: адаптеры не внедряются,
+обучения нет, сразу оценка тем же путём, что и у обученных методов.
+
 Эта же команда без изменений запускает и проверку на 200 примерах, и полный
 прогон. Отдельного «настоящего» пути запуска не существует: иначе проверенным
 оказался бы не тот код, который считает результаты.
@@ -9,6 +12,7 @@
     python scripts/run_experiment.py --config configs/smoke.yaml
     python scripts/run_experiment.py --config configs/base.yaml --method kan_lora \
         --dataset pauq --seed 2
+    python scripts/run_experiment.py --config configs/base.yaml --method none
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from kanlora.adapters.inject import inject_adapters  # noqa: E402
 from kanlora.analysis.spline_stats import model_nonlinearity  # noqa: E402
-from kanlora.config import apply_overrides, load_config  # noqa: E402
+from kanlora.config import METHODS, apply_overrides, load_config  # noqa: E402
 from kanlora.data.collate import Collator, build_dataset, build_prompts  # noqa: E402
 from kanlora.data.loaders import (  # noqa: E402
     LAYOUTS, load_dataset_schemas, load_examples, subsample,
@@ -39,7 +43,9 @@ from kanlora.train.loop import set_seed, train  # noqa: E402
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Один прогон эксперимента")
     parser.add_argument("--config", type=Path, default=Path("configs/base.yaml"))
-    parser.add_argument("--method", choices=["lora", "dora", "kan_lora"])
+    parser.add_argument(
+        "--method", choices=METHODS, help="none — базовая модель без адаптера, только оценка"
+    )
     parser.add_argument("--dataset", choices=["spider", "pauq"])
     parser.add_argument("--seed", type=int)
     parser.add_argument("--optimizer", dest="optimizer_name", choices=["adamw", "muon"])
@@ -54,6 +60,44 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--eval-limit", type=int)
     parser.add_argument("--output", type=Path, default=Path("results"))
     return parser.parse_args()
+
+
+def adapt_and_train(config, model, tokenizer, train_examples, schemas, device):
+    """Внедряет адаптеры и обучает; возвращает (injection, report, truncated).
+
+    Для `method: none` ничего не делает: модель остаётся исходной, обучаемых
+    параметров, отчёта обучения и счётчика усечённых обучающих промптов нет
+    (None — «не применимо», в карточке null).
+    """
+    if config.method == "none":
+        total = sum(parameter.numel() for parameter in model.parameters())
+        print(f"базовая модель без адаптера: параметров {total}, обучения нет")
+        return {"trainable_parameters": None, "total_parameters": total, "replaced": []}, None, None
+
+    injection = inject_adapters(model, config.method, config.adapter)
+    print(
+        f"обучаемых параметров: {injection.trainable_parameters} "
+        f"из {injection.total_parameters}, затронуто слоёв: {len(injection.replaced)}"
+    )
+
+    dataset, truncated = build_dataset(train_examples, schemas, tokenizer, config.max_length)
+    if truncated:
+        print(f"внимание: усечено промптов: {truncated} из {len(dataset)}")
+
+    report = train(
+        model=model,
+        dataset=dataset,
+        collator=Collator(pad_token_id=tokenizer.pad_token_id),
+        optimizer_config=config.optimizer,
+        train_config=config.train,
+        device=device,
+    )
+    injection_info = {
+        "trainable_parameters": injection.trainable_parameters,
+        "total_parameters": injection.total_parameters,
+        "replaced": list(injection.replaced),
+    }
+    return injection_info, report, truncated
 
 
 def main() -> int:
@@ -77,8 +121,12 @@ def main() -> int:
     layout = LAYOUTS[config.dataset]
     schemas = load_dataset_schemas(root, layout)
 
-    train_examples = subsample(
-        load_examples(root, layout, "train"), config.train_subset, config.subsample_seed
+    train_examples = (
+        []
+        if config.method == "none"
+        else subsample(
+            load_examples(root, layout, "train"), config.train_subset, config.subsample_seed
+        )
     )
     eval_examples = load_examples(root, layout, "eval")
     if config.eval_limit is not None:
@@ -91,23 +139,8 @@ def main() -> int:
     # fp32 явно и одинаково для всех трёх методов: сравнение по видеопамяти
     # осмысленно только при одинаковой точности.
     model = AutoModelForCausalLM.from_pretrained(config.model_name, dtype=torch.float32)
-    injection = inject_adapters(model, config.method, config.adapter)
-    print(
-        f"обучаемых параметров: {injection.trainable_parameters} "
-        f"из {injection.total_parameters}, затронуто слоёв: {len(injection.replaced)}"
-    )
-
-    dataset, truncated = build_dataset(train_examples, schemas, tokenizer, config.max_length)
-    if truncated:
-        print(f"внимание: усечено промптов: {truncated} из {len(dataset)}")
-
-    report = train(
-        model=model,
-        dataset=dataset,
-        collator=Collator(pad_token_id=tokenizer.pad_token_id),
-        optimizer_config=config.optimizer,
-        train_config=config.train,
-        device=device,
+    injection, report, truncated = adapt_and_train(
+        config, model, tokenizer, train_examples, schemas, device
     )
 
     predicted = generate_sql(
@@ -149,23 +182,23 @@ def main() -> int:
     spline_stats = model_nonlinearity(model) or None
     card = build_result_card(
         config=config,
-        injection={
-            "trainable_parameters": injection.trainable_parameters,
-            "total_parameters": injection.total_parameters,
-            "replaced": list(injection.replaced),
-        },
+        injection=injection,
         train_report=report,
         metrics=metrics,
         spline_stats=spline_stats,
     )
     path = write_result_card(card, arguments.output)
 
-    print(
+    summary = (
         f"Exact Match {metrics['exact_match']:.4f}, "
-        f"Execution Accuracy {metrics['execution_accuracy']}, "
-        f"пик видеопамяти {report.peak_memory_bytes / 2**30:.2f} ГиБ, "
-        f"время {report.seconds / 60:.1f} мин"
+        f"Execution Accuracy {metrics['execution_accuracy']}"
     )
+    if report is not None:
+        summary += (
+            f", пик видеопамяти {report.peak_memory_bytes / 2**30:.2f} ГиБ, "
+            f"время {report.seconds / 60:.1f} мин"
+        )
+    print(summary)
     print(f"карточка: {path}")
     return 0
 

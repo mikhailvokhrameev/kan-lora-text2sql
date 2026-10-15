@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kanlora.config import ExperimentConfig, apply_overrides, config_to_dict, load_config
+from kanlora.config import (
+    METHODS, ExperimentConfig, apply_overrides, config_to_dict, load_config,
+)
 
 BASE = Path(__file__).parents[1] / "configs" / "base.yaml"
 
@@ -82,3 +84,21 @@ def test_smoke_configuration_is_small_but_shaped_like_the_real_one() -> None:
     assert smoke.eval_limit == 50
     assert smoke.adapter == base.adapter
     assert smoke.max_length == base.max_length
+
+
+def test_baseline_method_none_is_a_valid_method(config: ExperimentConfig) -> None:
+    """`none` — базовая модель без адаптера: только оценка, без обучения."""
+    assert "none" in METHODS
+    assert apply_overrides(config, method="none").method == "none"
+
+
+def test_baseline_run_id_does_not_name_an_optimizer(config: ExperimentConfig) -> None:
+    """Без обучения оптимизатора нет; имя прогона не должно его упоминать."""
+    baseline = apply_overrides(config, method="none", dataset="pauq", seed=1)
+    assert baseline.run_id == "none-pauq-seed1"
+    assert apply_overrides(baseline, learn_input_scale=False).run_id == "none-pauq-seed1"
+
+
+def test_unknown_method_is_rejected(config: ExperimentConfig) -> None:
+    with pytest.raises(ValueError, match="method"):
+        apply_overrides(config, method="qlora")

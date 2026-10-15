@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from kanlora.config import load_config
+from kanlora.config import apply_overrides, load_config
 from kanlora.results import build_result_card, collect_versions, git_commit, write_result_card
 from kanlora.train.loop import TrainReport
 
@@ -85,3 +85,27 @@ def test_card_is_written_in_readable_utf8(card: dict, tmp_path: Path) -> None:
     card["note"] = "проверка"
     text = write_result_card(card, tmp_path).read_text(encoding="utf-8")
     assert "проверка" in text
+
+
+def test_baseline_card_leaves_training_fields_null() -> None:
+    """У базовой модели без адаптера нет обучения: обучаемых параметров, времени
+    обучения, оптимизатора и сеточных величин нет — null, а не ноль."""
+    config = apply_overrides(load_config(BASE), method="none")
+    card = build_result_card(
+        config=config,
+        injection={"trainable_parameters": None, "total_parameters": 500000, "replaced": []},
+        train_report=None,
+        metrics={"exact_match": 0.2, "execution_accuracy": None},
+        spline_stats=None,
+    )
+
+    assert card["method"] == "none"
+    assert card["run_id"] == "none-spider-seed0"
+    assert card["optimizer"] is None
+    assert card["total_parameters"] == 500000
+    for field in (
+        "trainable_parameters", "train_seconds", "peak_memory_bytes", "optimizer_coverage",
+        "step_losses", "epoch_losses", "fraction_inside_grid", "spline_stats",
+    ):
+        assert card[field] is None, field
+    assert card["adapted_modules"] == 0

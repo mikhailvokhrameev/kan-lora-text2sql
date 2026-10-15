@@ -92,8 +92,73 @@ def test_main_table_shows_spread_next_to_the_mean(module, cards) -> None:
 
 
 def test_main_table_includes_the_baseline_row_placeholder(module, cards) -> None:
-    """В таблицах обязателен базовый уровень без адаптера: видно, что дала адаптация."""
-    assert "без адаптера" in module.main_table(cards)
+    """В таблицах обязателен базовый уровень без адаптера: видно, что дала адаптация.
+    Пока карточки `method: none` нет, строка остаётся и говорит, что прогона нет."""
+    rows = [row for row in module.main_table(cards).splitlines() if "без адаптера" in row]
+    assert len(rows) == 1
+    assert "нет прогона" in rows[0]
+
+
+def baseline_card(dataset: str, seed: int, exact: float, execution: float | None = 0.3) -> dict:
+    """Карточка `method: none` в том виде, в каком её пишет build_result_card."""
+    return {
+        "run_id": f"none-{dataset}-seed{seed}",
+        "method": "none", "dataset": dataset, "seed": seed, "optimizer": None,
+        "config": {
+            "adapter": {"learn_input_scale": True},
+            "optimizer": {"name": "adamw"},
+        },
+        "metrics": {"exact_match": exact, "execution_accuracy": execution},
+        "peak_memory_bytes": None, "train_seconds": None,
+        "trainable_parameters": None,
+        "optimizer_coverage": None,
+        "fraction_inside_grid": None,
+        "spline_stats": None,
+    }
+
+
+def test_baseline_cell_key_has_no_optimizer_and_no_input_scale(module) -> None:
+    """Оптимизатор из замороженной конфигурации базовой модели не подхватывается:
+    обучения не было, ключ — (none, набор, None, None)."""
+    assert module.cell_key(baseline_card("spider", 0, 0.2)) == ("none", "spider", None, None)
+
+
+def test_baseline_row_is_filled_from_cards(module, cards) -> None:
+    table = module.main_table(
+        cards + [baseline_card("spider", 0, 0.20), baseline_card("spider", 1, 0.22)]
+    )
+    rows = [row for row in table.splitlines() if "без адаптера" in row]
+
+    assert len(rows) == 1
+    cells = [cell.strip() for cell in rows[0].strip("|").split("|")]
+    assert cells == [
+        "без адаптера (базовый уровень)", "—", "spider",
+        "0.2100 ± 0.0100", "0.3000 ± 0.0000", "—", "—",
+    ]
+    # Базовая точка — первая строка данных, над строками методов.
+    assert table.splitlines()[2] == rows[0]
+
+
+def test_baseline_rows_per_dataset(module, cards) -> None:
+    table = module.main_table(
+        cards + [baseline_card("spider", 0, 0.2), baseline_card("pauq", 0, 0.1, execution=None)]
+    )
+    rows = [row for row in table.splitlines() if "без адаптера" in row]
+
+    assert len(rows) == 2
+    assert any("pauq" in row and "не измерялась" in row for row in rows)
+
+
+def test_baseline_is_absent_from_the_optimizer_and_nonlinearity_tables(module, cards) -> None:
+    with_baseline = cards + [baseline_card("spider", 0, 0.2)]
+    assert "none-spider-seed0" not in module.optimizer_table(with_baseline)
+    assert "none-spider-seed0" not in module.nonlinearity_table(with_baseline)
+
+
+def test_plot_tolerates_baseline_cards(module, cards, tmp_path: Path) -> None:
+    path = tmp_path / "grid.png"
+    module.plot_fraction_inside_grid(cards + [baseline_card("spider", 0, 0.2)], path)
+    assert path.is_file()
 
 
 def test_optimizer_table_shows_muon_coverage(module, cards) -> None:

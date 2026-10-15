@@ -16,7 +16,12 @@ from kanlora.adapters.base import AdapterConfig
 from kanlora.train.loop import TrainConfig
 from kanlora.train.optimizers import OptimizerConfig
 
-__all__ = ["ExperimentConfig", "apply_overrides", "config_to_dict", "load_config"]
+__all__ = ["METHODS", "ExperimentConfig", "apply_overrides", "config_to_dict", "load_config"]
+
+# `none` — базовая точка: Qwen2.5-Coder-Instruct без адаптера, без обучения,
+# только оценка тем же путём (промпты, усечение, генерация), что и у обученных
+# методов. Без неё не видно, дало ли дообучение что-то вообще.
+METHODS = ("none", "lora", "dora", "kan_lora")
 
 
 @dataclass(frozen=True)
@@ -36,9 +41,18 @@ class ExperimentConfig:
     train: TrainConfig
     optimizer: OptimizerConfig
 
+    def __post_init__(self) -> None:
+        if self.method not in METHODS:
+            raise ValueError(f"method={self.method!r}: допустимы {', '.join(METHODS)}")
+
     @property
     def run_id(self) -> str:
-        """Имя прогона, различающее все ячейки матрицы экспериментов."""
+        """Имя прогона, различающее все ячейки матрицы экспериментов.
+
+        У базовой модели без адаптера оптимизатора нет: обучения не было.
+        """
+        if self.method == "none":
+            return f"none-{self.dataset}-seed{self.seed}"
         name = f"{self.method}-{self.dataset}-{self.optimizer.name}-seed{self.seed}"
         if self.method == "kan_lora" and not self.adapter.learn_input_scale:
             name += "-no-input-scale"
