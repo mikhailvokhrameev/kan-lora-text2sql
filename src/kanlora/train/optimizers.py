@@ -101,8 +101,13 @@ def _build_muon(model: nn.Module, config: OptimizerConfig) -> OptimizerBundle:
     optimizers: list[Optimizer] = []
     if matrices:
         optimizers.append(
+            # "match_rms_adamw" масштабирует шаг на 0.2 * sqrt(max(A, B)), так что
+            # RMS обновления ≈ 0.2 — как у AdamW, и один lr честен для обоих.
             torch.optim.Muon(
-                matrices, lr=config.learning_rate, weight_decay=config.weight_decay
+                matrices,
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+                adjust_lr_fn="match_rms_adamw",
             )
         )
     if rest:

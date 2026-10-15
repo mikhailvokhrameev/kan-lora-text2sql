@@ -133,3 +133,41 @@ def test_zero_grad_clears_gradients(adapter) -> None:
 def test_unknown_optimizer_is_rejected(adapter) -> None:
     with pytest.raises(KeyError):
         build_optimizer(adapter, OptimizerConfig(name="lion"))
+
+
+def test_muon_uses_adamw_matched_update_scale() -> None:
+    """Muon создан с `adjust_lr_fn="match_rms_adamw"` и общим для методов lr.
+
+    Проверяется настоящий созданный `torch.optim.Muon`, а не вызов фабрики.
+    Без этого параметра шаг Muon на `lora_a` (8x896) примерно в 30 раз меньше
+    шага AdamW при том же lr, и сравнение оптимизаторов проиграно настройкой.
+    """
+    adapter = LoRALinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig(rank=RANK))
+    config = OptimizerConfig(name="muon")
+    bundle = build_optimizer(adapter, config)
+
+    muon = next(o for o in bundle.optimizers if isinstance(o, torch.optim.Muon))
+    assert muon.defaults["adjust_lr_fn"] == "match_rms_adamw"
+    assert all(group["adjust_lr_fn"] == "match_rms_adamw" for group in muon.param_groups)
+    assert all(group["lr"] == config.learning_rate for group in muon.param_groups)
+
+
+def test_muon_step_rms_matches_adamw_scale() -> None:
+    """Реальный шаг Muon на `lora_a` (8x896) имеет RMS около 0.2 * lr, как у AdamW.
+
+    Это и есть смысл `match_rms_adamw`: одна скорость обучения даёт сопоставимый
+    по величине шаг для обоих оптимизаторов. Без параметра RMS был бы около
+    lr / sqrt(896), то есть примерно в 6 раз меньше 0.2 * lr.
+    """
+    torch.manual_seed(0)
+    lr = 1.0e-2
+    adapter = LoRALinear(nn.Linear(896, 64), AdapterConfig(rank=8))
+    lora_a = adapter.lora_a
+    before = lora_a.detach().clone()
+    for parameter in trainable(adapter):
+        parameter.grad = torch.randn_like(parameter)
+
+    build_optimizer(adapter, OptimizerConfig(name="muon", learning_rate=lr)).step()
+
+    step_rms = (lora_a.detach() - before).pow(2).mean().sqrt().item()
+    assert step_rms == pytest.approx(0.2 * lr, rel=0.3)
