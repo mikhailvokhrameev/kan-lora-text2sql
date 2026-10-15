@@ -139,8 +139,9 @@ def test_muon_uses_adamw_matched_update_scale() -> None:
     """Muon создан с `adjust_lr_fn="match_rms_adamw"` и общим для методов lr.
 
     Проверяется настоящий созданный `torch.optim.Muon`, а не вызов фабрики.
-    Без этого параметра шаг Muon на `lora_a` (8x896) примерно в 30 раз меньше
-    шага AdamW при том же lr, и сравнение оптимизаторов проиграно настройкой.
+    Без этого параметра шаг Muon на `lora_a` (8x896) около 0.033 * lr: примерно
+    в 30 раз меньше шага AdamW на старте (lr) и в 6–12 раз меньше
+    установившегося (0.2–0.4 * lr), и сравнение оптимизаторов проиграно настройкой.
     """
     adapter = LoRALinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig(rank=RANK))
     config = OptimizerConfig(name="muon")
