@@ -49,6 +49,37 @@ def test_escaped_quote_does_not_end_the_string() -> None:
     assert normalize_sql(text) == r"SELECT * FROM t WHERE name = 'it\'s fine; ok'"
 
 
+def test_extracts_sql_from_a_fenced_block_with_language_tag() -> None:
+    """Instruct-модель часто отвечает в Markdown-блоке: без извлечения резка по
+    первому переводу строки оставила бы от ответа одну строку ```sql."""
+    text = "Here is the query:\n```sql\nSELECT a\nFROM t;\n```\nIt selects a."
+    assert normalize_sql(text) == "SELECT a FROM t"
+
+
+def test_extracts_sql_from_a_fenced_block_without_language_tag() -> None:
+    assert normalize_sql("```\nSELECT a FROM t\n```") == "SELECT a FROM t"
+
+
+def test_takes_only_the_first_fenced_block() -> None:
+    text = "```sql\nSELECT a FROM t\n```\nor\n```sql\nSELECT b FROM u\n```"
+    assert normalize_sql(text) == "SELECT a FROM t"
+
+
+def test_unclosed_fence_takes_the_rest_of_the_text() -> None:
+    """Генерация может оборваться по max_new_tokens раньше закрывающей ограды."""
+    assert normalize_sql("```sql\nSELECT a FROM t") == "SELECT a FROM t"
+
+
+def test_inline_fence_on_one_line() -> None:
+    assert normalize_sql("```SELECT a FROM t```") == "SELECT a FROM t"
+
+
+def test_unfenced_generation_is_unchanged() -> None:
+    """Ответ без ограды (так отвечают обученные адаптеры) режется как раньше."""
+    text = "SELECT a FROM t\nQuestion: next"
+    assert normalize_sql(text) == "SELECT a FROM t"
+
+
 @pytest.mark.slow
 def test_generates_one_string_per_prompt(tiny_causal_lm, tiny_tokenizer) -> None:
     prompts = ["SELECT", "FROM", "WHERE"]
