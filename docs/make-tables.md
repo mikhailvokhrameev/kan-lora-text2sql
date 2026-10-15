@@ -97,6 +97,15 @@ def optimizer_table(cards: list[dict]) -> str
 DoRA — они не нелинейны, поле равно `null`) пропускаются, а не выводятся
 строкой из прочерков.
 
+Адаптеры, у которых `mean`/`max` равны `NaN` (все активации вне сетки, измерять
+нечего — см. `docs/nonlinearity.md`), при агрегации пропускаются: среднее и
+максимум считаются только по измеренным адаптерам, иначе `NaN` заражал бы
+среднее, а `max()` с `NaN` зависит от порядка элементов. Если не измерен ни
+один адаптер прогона, в обеих ячейках стоит «не измерялась» — как и для
+отсутствующей метрики в основной таблице. Покрывают это
+`test_nonlinearity_table_skips_unmeasured_adapters` и
+`test_nonlinearity_table_marks_run_with_nothing_measured`.
+
 `optimizer_table` берёт `optimizer_coverage` карточки — распределение
 обучаемых параметров между `torch.optim.AdamW` и `torch.optim.Muon`
 (`docs/optimizers.md`) — и выводит абсолютные числа и долю параметров,

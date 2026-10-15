@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -97,13 +98,15 @@ def nonlinearity_table(cards: list[dict]) -> str:
         stats = card.get("spline_stats")
         if not stats:
             continue
-        means = [values["mean"] for values in stats.values()]
-        maxima = [values["max"] for values in stats.values()]
+        # NaN у адаптера означает, что все его активации вне сетки и мерить нечего
+        # (docs/nonlinearity.md). Такие адаптеры пропускаются: иначе NaN заражал бы
+        # среднее, а max() с NaN зависит от порядка элементов.
+        means = [v["mean"] for v in stats.values() if not math.isnan(v["mean"])]
+        maxima = [v["max"] for v in stats.values() if not math.isnan(v["max"])]
+        mean_cell = f"{sum(means) / len(means):.4f}" if means else "не измерялась"
+        max_cell = f"{max(maxima):.4f}" if maxima else "не измерялась"
         fractions = card.get("fraction_inside_grid") or [float("nan")]
-        lines.append(
-            f"| {card['run_id']} | {sum(means) / len(means):.4f} | {max(maxima):.4f} "
-            f"| {fractions[-1]:.3f} |"
-        )
+        lines.append(f"| {card['run_id']} | {mean_cell} | {max_cell} | {fractions[-1]:.3f} |")
     return "\n".join(lines)
 
 

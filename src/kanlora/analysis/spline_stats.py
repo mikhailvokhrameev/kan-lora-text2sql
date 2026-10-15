@@ -2,8 +2,9 @@
 
 Отвечает на главный вопрос работы: используется ли нелинейность в адаптере
 на самом деле. К каждой выученной одномерной функции подгоняется прямая
-методом наименьших квадратов на том отрезке, куда реально попадают активации,
-и берётся доля дисперсии, которую прямая не объясняет:
+методом наименьших квадратов на том отрезке, куда реально попадают активации
+и где при этом определён сплайн, и берётся доля дисперсии, которую прямая не
+объясняет:
 
     index = RSS / TSS,   RSS — остаток после подгонки, TSS — полная дисперсия.
 
@@ -24,7 +25,13 @@ from kanlora.adapters.inject import adapter_modules
 from kanlora.adapters.kan_layer import KANLayer
 from kanlora.adapters.kan_lora import KANLoRALinear
 
-__all__ = ["EdgeStats", "layer_nonlinearity", "model_nonlinearity", "nonlinearity_index"]
+__all__ = [
+    "EdgeStats",
+    "layer_nonlinearity",
+    "measurement_interval",
+    "model_nonlinearity",
+    "nonlinearity_index",
+]
 
 
 @dataclass(frozen=True)
@@ -50,23 +57,56 @@ def nonlinearity_index(inputs: torch.Tensor, outputs: torch.Tensor) -> float:
     return float((residual / total).clamp(min=0.0, max=1.0))
 
 
+# Запас от правого края сетки: базис полуоткрыт, `x == hi` уже даёт ноль.
+_GRID_MARGIN = 0.99
+
+
+def measurement_interval(
+    layer: KANLayer, source: int, lo: float, hi: float
+) -> tuple[float, float] | None:
+    """Отрезок измерения для входа `source`: [lo, hi] внутри области определения сетки.
+
+    Слой считает `out = s * phi(x / s)`, сетка лежит в координате `u = x / s`,
+    то есть в координатах входа это отрезок `grid_range * s` (для отрицательного
+    `s` границы меняются местами). За ним сплайн равен нулю, и прямая,
+    подогнанная по такому участку, оценивает не выученную функцию, а границу
+    области определения. Поэтому отрезок обрезается по сетке. Возвращает `None`,
+    если пересечение пусто или вырождено в точку: мерить нечего.
+    """
+    grid_lo, grid_hi = layer.grid_range
+    scale = float(layer._safe_input_scale_divisor()[source])
+    edges = sorted((_GRID_MARGIN * grid_lo * scale, _GRID_MARGIN * grid_hi * scale))
+    start, stop = max(lo, edges[0]), min(hi, edges[1])
+    return (start, stop) if start < stop else None
+
+
 def layer_nonlinearity(
     layer: KANLayer, lo: float, hi: float, samples: int = 257
 ) -> list[EdgeStats]:
-    """Индекс нелинейности каждого ребра слоя на отрезке [lo, hi].
+    """Индекс нелинейности каждого ребра слоя на отрезке [lo, hi] внутри сетки.
 
-    Отрезок задаётся снаружи: мерить надо там, куда попадают активации,
-    а не на всей области определения сетки.
+    Отрезок задаётся снаружи: мерить надо там, куда попадают активации, а не на
+    всей области определения сетки. Но и за пределами сетки мерить нельзя: там
+    сплайн равен нулю, и даже тождественный слой получил бы высокий индекс.
+    Поэтому для каждого входа `source` отрезок обрезается по области определения
+    сетки в координатах входа (`measurement_interval`; масштаб `input_scale`
+    у каждого входа свой). Допускаются `lo = -inf`, `hi = inf` — тогда мерится
+    вся область определения. Рёбра входа, для которого пересечение пусто,
+    в результат не попадают.
     """
     device = layer.spline_coefficients.device
-    grid = torch.linspace(lo, hi, samples, dtype=torch.float64, device=device)
+    dtype = layer.spline_coefficients.dtype
 
     stats: list[EdgeStats] = []
     with torch.no_grad():
         for source in range(layer.in_features):
-            probe = torch.zeros(samples, layer.in_features, dtype=layer.spline_coefficients.dtype,
-                                device=device)
-            probe[:, source] = grid.to(probe.dtype)
+            interval = measurement_interval(layer, source, lo, hi)
+            if interval is None:
+                continue
+
+            grid = torch.linspace(*interval, samples, dtype=torch.float64, device=device)
+            probe = torch.zeros(samples, layer.in_features, dtype=dtype, device=device)
+            probe[:, source] = grid.to(dtype)
             response = layer(probe)
             for target in range(layer.out_features):
                 stats.append(
@@ -82,9 +122,11 @@ def model_nonlinearity(
 
     Отрезок измерения для каждого адаптера берётся из `ranges`, если он задан;
     иначе — фактический размах, накопленный адаптером за прошедшие проходы
-    (`observed_range`), а если проходов ещё не было — вся сетка сплайна.
-    Подгонять прямую нужно там, куда реально попадают активации, а не по всей
-    области определения: иначе индекс завышается на неиспользуемой части сетки.
+    (`observed_range`), а если проходов ещё не было — вся область определения
+    сетки. В любом случае отрезок обрезается по сетке (`layer_nonlinearity`):
+    за ней сплайн равен нулю и измерять там нечего. Если для адаптера пересечение
+    пусто, `mean` и `max` равны `NaN`; долю входов вне сетки показывает
+    `fraction_inside_grid`.
     """
     summary: dict[str, dict[str, float]] = {}
 
@@ -97,14 +139,13 @@ def model_nonlinearity(
         else:
             lo, hi = module.observed_range()
             if lo > hi:
-                grid_lo, grid_hi = module.kan.grid_range
-                lo, hi = 0.99 * grid_lo, 0.99 * grid_hi
+                lo, hi = float("-inf"), float("inf")
 
         values = [item.nonlinearity for item in layer_nonlinearity(module.kan, lo, hi)]
         fraction = module.last_fraction_inside_grid()
         summary[name] = {
-            "mean": sum(values) / len(values),
-            "max": max(values),
+            "mean": sum(values) / len(values) if values else float("nan"),
+            "max": max(values) if values else float("nan"),
             "fraction_inside_grid": float("nan") if fraction is None else fraction,
         }
     return summary

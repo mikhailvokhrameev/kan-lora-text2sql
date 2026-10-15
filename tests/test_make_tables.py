@@ -93,3 +93,32 @@ def test_plot_writes_a_file(module, cards, tmp_path: Path) -> None:
     path = tmp_path / "grid.png"
     module.plot_fraction_inside_grid(cards, path)
     assert path.is_file() and path.stat().st_size > 0
+
+
+def _kan_card(stats: dict) -> dict:
+    return {**card("kan_lora", "spider", 0, 0.45), "spline_stats": stats}
+
+
+def _nonlinearity_row(module, stats: dict) -> list[str]:
+    row = module.nonlinearity_table([_kan_card(stats)]).splitlines()[-1]
+    return [cell.strip() for cell in row.strip("|").split("|")]
+
+
+@pytest.mark.parametrize("nan_first", [True, False])
+def test_nonlinearity_table_skips_unmeasured_adapters(module, nan_first: bool) -> None:
+    """NaN адаптера целиком вне сетки не должен ни заражать среднее, ни теряться в max."""
+    nan = float("nan")
+    stats = {"a": {"mean": nan, "max": nan}, "b": {"mean": 0.2, "max": 0.5}}
+    if not nan_first:
+        stats = dict(reversed(list(stats.items())))
+
+    _, mean, maximum, _ = _nonlinearity_row(module, stats)
+    assert mean == "0.2000" and maximum == "0.5000"
+
+
+def test_nonlinearity_table_marks_run_with_nothing_measured(module) -> None:
+    nan = float("nan")
+    _, mean, maximum, _ = _nonlinearity_row(
+        module, {"a": {"mean": nan, "max": nan}, "b": {"mean": nan, "max": nan}}
+    )
+    assert mean == maximum == "не измерялась"

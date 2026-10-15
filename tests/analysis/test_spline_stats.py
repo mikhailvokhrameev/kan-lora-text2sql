@@ -114,3 +114,72 @@ def test_model_summary_uses_supplied_ranges(tiny_causal_lm) -> None:
     narrow = model_nonlinearity(tiny_causal_lm, {name: (-0.05, 0.05) for name in names})
 
     assert narrow[names[0]]["max"] < wide[names[0]]["max"]
+
+
+def test_identity_layer_is_linear_even_if_observed_range_exceeds_the_grid() -> None:
+    """За сеткой сплайн равен нулю: мерить там нельзя, иначе тождество даст «нелинейность»."""
+    layer = KANLayer(3, 3, grid_size=5, spline_order=3, dtype=torch.float64)
+    stats = layer_nonlinearity(layer, lo=-3.0, hi=3.0)
+
+    assert len(stats) == 9
+    assert max(item.nonlinearity for item in stats) == pytest.approx(0.0, abs=1e-8)
+
+
+def test_measurement_domain_follows_input_scale() -> None:
+    """Сетка в координатах входа — это [-s, s]: отрезок обрезается по ней, а не по [-1, 1]."""
+    layer = KANLayer(2, 2, grid_size=5, spline_order=3, dtype=torch.float64)
+    with torch.no_grad():
+        layer.input_scale.fill_(2.0)
+        layer.spline_coefficients.add_(0.5 * torch.randn_like(layer.spline_coefficients))
+
+    clipped = layer_nonlinearity(layer, lo=-5.0, hi=5.0)
+    inside = layer_nonlinearity(layer, lo=-0.99 * 2.0, hi=0.99 * 2.0)
+
+    assert [item.nonlinearity for item in clipped] == pytest.approx(
+        [item.nonlinearity for item in inside]
+    )
+
+
+def test_measurement_domain_is_per_input_feature() -> None:
+    layer = KANLayer(2, 1, grid_size=5, spline_order=3, dtype=torch.float64)
+    with torch.no_grad():
+        layer.input_scale.copy_(torch.tensor([1.0, 4.0], dtype=torch.float64))
+        layer.spline_coefficients.add_(0.5 * torch.randn_like(layer.spline_coefficients))
+
+    wide = layer_nonlinearity(layer, lo=-10.0, hi=10.0)
+    exact = [
+        layer_nonlinearity(layer, lo=-0.99 * s, hi=0.99 * s)[source].nonlinearity
+        for source, s in enumerate((1.0, 4.0))
+    ]
+    assert [item.nonlinearity for item in wide] == pytest.approx(exact)
+
+
+def test_range_entirely_outside_the_grid_yields_no_measurement() -> None:
+    """Пустое пересечение с областью сетки: мерить нечего, рёбра не попадают в результат."""
+    layer = KANLayer(2, 2, grid_size=5, spline_order=3, dtype=torch.float64)
+    assert layer_nonlinearity(layer, lo=5.0, hi=6.0) == []
+
+
+def test_model_summary_ignores_the_part_of_observed_range_outside_the_grid(
+    tiny_causal_lm,
+) -> None:
+    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
+    for _, module in adapter_modules(tiny_causal_lm):
+        module.observed_lo.fill_(-3.0)
+        module.observed_hi.fill_(3.0)
+
+    summary = model_nonlinearity(tiny_causal_lm)
+    for values in summary.values():
+        assert values["mean"] == pytest.approx(0.0, abs=1e-6)
+        assert values["max"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_model_summary_is_nan_when_observed_range_is_outside_the_grid(tiny_causal_lm) -> None:
+    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
+    for _, module in adapter_modules(tiny_causal_lm):
+        module.observed_lo.fill_(5.0)
+        module.observed_hi.fill_(6.0)
+
+    for values in model_nonlinearity(tiny_causal_lm).values():
+        assert math.isnan(values["mean"])
+        assert math.isnan(values["max"])
