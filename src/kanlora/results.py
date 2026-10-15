@@ -76,6 +76,7 @@ def build_result_card(
         "step_losses": train_report.step_losses if trained else None,
         "epoch_losses": train_report.epoch_losses if trained else None,
         "validation_losses": train_report.validation_losses if trained else None,
+        "grad_norms": train_report.grad_norms if trained else None,
         "fraction_inside_grid": train_report.fraction_inside_grid if trained else None,
         "spline_stats": spline_stats,
     }

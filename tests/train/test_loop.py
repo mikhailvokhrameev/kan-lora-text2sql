@@ -351,3 +351,22 @@ def test_validation_passes_do_not_touch_training_statistics(tiny_causal_lm) -> N
     assert without.validation_losses == []
     assert with_validation.step_losses == pytest.approx(without.step_losses)
     assert with_validation.fraction_inside_grid == pytest.approx(without.fraction_inside_grid)
+
+
+def test_report_records_gradient_norm_before_clipping(tiny_causal_lm) -> None:
+    """Норма до обрезания — по одной на шаг оптимизатора; после обрезания она была бы ≤ порога."""
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=1e-3, max_grad_norm=1e-6),
+        train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=2,
+                                 gradient_checkpointing=False),
+        device=DEVICE,
+    )
+
+    # 5 батчей на эпоху, группы по 2: шаги после 2-го, 4-го и 5-го батча.
+    assert len(report.grad_norms) == 2 * 3
+    assert all(norm > 1e-6 for norm in report.grad_norms)

@@ -50,6 +50,9 @@ class TrainReport:
     epoch_losses: list[float] = field(default_factory=list)
     # [0] — до первого шага, затем по одному значению в конце каждой эпохи.
     validation_losses: list[float] = field(default_factory=list)
+    # Норма градиента до обрезания, по одной на шаг оптимизатора: видно, как
+    # часто срабатывает обрезание и как меняется масштаб градиента.
+    grad_norms: list[float] = field(default_factory=list)
     fraction_inside_grid: list[float] = field(default_factory=list)
     peak_memory_bytes: int = 0
     seconds: float = 0.0
@@ -164,7 +167,8 @@ def train(
                 print(f"шаг {index}/{len(loader)} (эпоха {epoch + 1}): функция потерь {step_loss:.4f}")
 
             if index % train_config.gradient_accumulation == 0 or index == len(loader):
-                bundle.clip_grad_norm_(optimizer_config.max_grad_norm)
+                norm = bundle.clip_grad_norm_(optimizer_config.max_grad_norm)
+                report.grad_norms.append(norm.item())
                 bundle.step()
                 bundle.zero_grad()
 

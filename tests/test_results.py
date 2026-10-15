@@ -25,7 +25,7 @@ def card() -> dict:
         train_report=TrainReport(
             step_losses=[2.0, 1.0], epoch_losses=[1.5], validation_losses=[2.4, 1.6],
             fraction_inside_grid=[0.87],
-            peak_memory_bytes=4_000_000_000, seconds=4200.0,
+            grad_norms=[0.8, 0.5], peak_memory_bytes=4_000_000_000, seconds=4200.0,
             optimizer_coverage={"adamw": 1234, "muon": 0},
         ),
         metrics={"exact_match": 0.41, "execution_accuracy": 0.55,
@@ -46,6 +46,10 @@ def test_card_carries_everything_needed_to_reproduce(card: dict) -> None:
 def test_card_carries_the_validation_loss_curve(card: dict) -> None:
     """Значение на шаге 0 и после каждой эпохи — кривая, а не одно число."""
     assert card["validation_losses"] == [2.4, 1.6]
+
+
+def test_card_carries_gradient_norms_before_clipping(card: dict) -> None:
+    assert card["grad_norms"] == [0.8, 0.5]
 
 
 def test_versions_include_the_libraries_that_affect_numbers() -> None:
@@ -111,7 +115,7 @@ def test_baseline_card_leaves_training_fields_null() -> None:
     assert card["total_parameters"] == 500000
     for field in (
         "trainable_parameters", "train_seconds", "peak_memory_bytes", "optimizer_coverage",
-        "step_losses", "epoch_losses", "validation_losses", "fraction_inside_grid",
+        "step_losses", "epoch_losses", "validation_losses", "grad_norms", "fraction_inside_grid",
         "spline_stats",
     ):
         assert card[field] is None, field

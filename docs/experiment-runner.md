@@ -195,7 +195,7 @@ Execution Accuracy; `spline_stats` — сводка `model_nonlinearity`
 YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
 видеопамяти — величина обучения, на оценке не замеряется),
 `optimizer_coverage`, `step_losses`, `epoch_losses`, `validation_losses`,
-`fraction_inside_grid`, `spline_stats`; `adapted_modules` равно 0,
+`grad_norms`, `fraction_inside_grid`, `spline_stats`; `adapted_modules` равно 0,
 `metrics.truncated_prompts` — `null` (обучающая выборка не кодируется).
 `null` здесь значит «не применимо: не обучалась», а не ноль — по тому же
 принципу, что и для Execution Accuracy ниже. Читатели карточек это
@@ -206,6 +206,8 @@ YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
 значение на каждом шаге оптимизатора (после накопления градиента), и
 `epoch_losses` — среднее за эпоху. Третий ряд — `validation_losses`:
 функция потерь на валидационной выборке на шаге 0 и после каждой эпохи.
+Рядом — `grad_norms`: норма градиента до обрезания на каждом шаге
+оптимизатора (`docs/train-loop.md`).
 Без `step_losses` в карточке нельзя
 отличить гладкое обучение от скачков внутри эпохи, усреднение до одного
 числа на эпоху эту информацию стирает необратимо.
