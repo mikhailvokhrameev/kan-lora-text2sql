@@ -74,6 +74,25 @@ def test_inline_fence_on_one_line() -> None:
     assert normalize_sql("```SELECT a FROM t```") == "SELECT a FROM t"
 
 
+def test_sql_before_an_empty_trailing_fence_is_kept() -> None:
+    """Пустой блок после запроса не должен обнулять ответ: правило без ограды."""
+    assert normalize_sql("SELECT a FROM t\n```") == "SELECT a FROM t"
+
+
+def test_fence_not_opening_a_line_is_not_a_block() -> None:
+    """Ограда посреди строки (в пояснении после ответа) — не Markdown-блок."""
+    text = "SELECT a FROM t;\nExplanation: ```sql\nSELECT b```"
+    assert normalize_sql(text) == "SELECT a FROM t"
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["``` sql\nSELECT a FROM t\n```", "```sql\r\nSELECT a FROM t\r\n```", "```sql \nSELECT a FROM t```"],
+)
+def test_language_tag_tolerates_spaces_and_crlf(text: str) -> None:
+    assert normalize_sql(text) == "SELECT a FROM t"
+
+
 def test_unfenced_generation_is_unchanged() -> None:
     """Ответ без ограды (так отвечают обученные адаптеры) режется как раньше."""
     text = "SELECT a FROM t\nQuestion: next"
