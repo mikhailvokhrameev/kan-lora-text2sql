@@ -46,14 +46,21 @@ class KANLoRALinear(AdapterLinear):
         if not config.learn_input_scale:
             self.kan.input_scale.requires_grad_(False)
 
-        self._fraction_inside_grid: torch.Tensor | None = None
+        # Сумма и число долей по обучающим проходам с последнего сброса. Сумма —
+        # тензор на устройстве слоя, счётчик — обычное число: так forward не
+        # синхронизирует CPU с GPU, а `.item()` вызывается один раз в эпоху.
+        self._fraction_sum: torch.Tensor | None = None
+        self._fraction_count = 0
         self.register_buffer("observed_lo", torch.tensor(float("inf")))
         self.register_buffer("observed_hi", torch.tensor(float("-inf")))
 
     def delta(self, x: torch.Tensor) -> torch.Tensor:
         projected = torch.nn.functional.linear(x, self.lora_a)
         with torch.no_grad():
-            self._fraction_inside_grid = self.kan.fraction_inside_grid(projected)
+            # Только обучающие проходы: генерация и замер задержки идут в eval()
+            # и не должны подмешиваться в статистику эпохи обучения.
+            if self.training:
+                self._accumulate_fraction_inside_grid(self.kan.fraction_inside_grid(projected))
             self.observed_lo = torch.minimum(self.observed_lo, projected.min())
             self.observed_hi = torch.maximum(self.observed_hi, projected.max())
         return self.scaling * torch.nn.functional.linear(self.kan(projected), self.lora_b)
@@ -61,14 +68,34 @@ class KANLoRALinear(AdapterLinear):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.base(x) + self.delta(x)
 
-    def last_fraction_inside_grid(self) -> float | None:
-        """Доля входов сплайна, попавших в сетку на последнем проходе.
+    def _accumulate_fraction_inside_grid(self, fraction: torch.Tensor) -> None:
+        # float32 независимо от dtype активаций: сумму сотен долей в bf16 копить нельзя.
+        fraction = fraction.detach().float()
+        if self._fraction_sum is None:
+            self._fraction_sum = fraction
+        else:
+            self._fraction_sum = self._fraction_sum.to(fraction.device) + fraction
+        self._fraction_count += 1
 
-        Если она мала, базис обнуляется и адаптер вырождается в LoRA с
+    def reset_fraction_inside_grid(self) -> None:
+        """Начинает накопление доли входов в сетке заново (цикл вызывает в начале эпохи)."""
+        self._fraction_sum = None
+        self._fraction_count = 0
+
+    def mean_fraction_inside_grid(self) -> float | None:
+        """Средняя доля входов сплайна, попавших в сетку, по обучающим проходам.
+
+        Усредняется по всем проходам с последнего `reset_fraction_inside_grid()`,
+        а не берётся с последнего микробатча: один микробатч (в пределе — один
+        пример) не характеризует эпоху. `None`, если обучающих проходов не было.
+
+        Если доля мала, базис обнуляется и адаптер вырождается в LoRA с
         неработающими параметрами — самая частая скрытая ошибка в реализациях
         KAN-адаптеров. Поэтому величина снимается на каждом проходе.
         """
-        return self._fraction_inside_grid.item() if self._fraction_inside_grid is not None else None
+        if self._fraction_sum is None:
+            return None
+        return self._fraction_sum.item() / self._fraction_count
 
     def observed_range(self) -> tuple[float, float]:
         """Фактический размах входа слоя KAN, накопленный за все проходы.

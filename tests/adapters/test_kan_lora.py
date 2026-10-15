@@ -117,14 +117,69 @@ def test_refuses_to_merge(adapter: KANLoRALinear) -> None:
         adapter.merge()
 
 
+def outside_input(n: int = 16) -> torch.Tensor:
+    return 1e4 * torch.randn(n, IN_FEATURES, dtype=torch.float64)
+
+
 def test_reports_fraction_inside_grid_after_forward(adapter: KANLoRALinear) -> None:
     """Диагностика вырождения снимается на каждом проходе, а не отдельным прогоном."""
-    assert adapter.last_fraction_inside_grid() is None
+    assert adapter.mean_fraction_inside_grid() is None
     adapter(small_input())
-    assert adapter.last_fraction_inside_grid() == pytest.approx(1.0)
+    assert adapter.mean_fraction_inside_grid() == pytest.approx(1.0)
 
-    adapter(1e4 * torch.randn(16, IN_FEATURES, dtype=torch.float64))
-    assert adapter.last_fraction_inside_grid() < 0.5
+    adapter.reset_fraction_inside_grid()
+    adapter(outside_input())
+    assert adapter.mean_fraction_inside_grid() < 0.5
+
+
+def test_fraction_inside_grid_is_the_mean_over_all_forward_passes(
+    adapter: KANLoRALinear,
+) -> None:
+    """Не значение последнего прохода: один микробатч не характеризует эпоху."""
+    far = outside_input()
+    last = adapter.kan.fraction_inside_grid(
+        torch.nn.functional.linear(far, adapter.lora_a)
+    ).item()
+    assert last < 0.5
+
+    adapter(small_input())
+    adapter(small_input())
+    adapter(far)
+
+    assert adapter.mean_fraction_inside_grid() == pytest.approx((2.0 + last) / 3)
+
+
+def test_reset_starts_a_new_fraction_accumulation(adapter: KANLoRALinear) -> None:
+    adapter(outside_input())
+    adapter.reset_fraction_inside_grid()
+    assert adapter.mean_fraction_inside_grid() is None
+
+    adapter(small_input())
+    assert adapter.mean_fraction_inside_grid() == pytest.approx(1.0)
+
+
+def test_eval_forward_passes_do_not_pollute_fraction_inside_grid(
+    adapter: KANLoRALinear,
+) -> None:
+    """Генерация и замер задержки идут в `eval()`: это не обучающие активации."""
+    adapter(small_input())
+    adapter.eval()
+    adapter(outside_input())
+    adapter(outside_input())
+    assert adapter.mean_fraction_inside_grid() == pytest.approx(1.0)
+
+    adapter.reset_fraction_inside_grid()
+    adapter(outside_input())
+    assert adapter.mean_fraction_inside_grid() is None
+
+
+def test_fraction_inside_grid_does_not_change_forward_output(
+    adapter: KANLoRALinear,
+) -> None:
+    x = small_input()
+    train_output = adapter(x)
+    adapter.eval()
+    assert torch.equal(adapter(x), train_output)
 
 
 def test_gradients_reach_spline_coefficients(adapter: KANLoRALinear) -> None:
@@ -157,13 +212,15 @@ def test_fraction_inside_grid_stays_a_tensor_between_forward_passes(
 ) -> None:
     """`.item()` синхронизирует CPU с GPU — на каждый forward это лишний барьер.
 
-    `delta()` обязана хранить необработанный тензор; `.item()` — привилегия
-    `last_fraction_inside_grid()`, вызываемого раз в эпоху из цикла обучения,
+    `delta()` обязана копить сумму тензором; `.item()` — привилегия
+    `mean_fraction_inside_grid()`, вызываемого раз в эпоху из цикла обучения,
     а не самого forward-прохода.
     """
     adapter(small_input())
-    assert isinstance(adapter._fraction_inside_grid, torch.Tensor)
-    assert isinstance(adapter.last_fraction_inside_grid(), float)
+    adapter(small_input())
+    assert isinstance(adapter._fraction_sum, torch.Tensor)
+    assert adapter._fraction_count == 2
+    assert isinstance(adapter.mean_fraction_inside_grid(), float)
 
 
 def test_observed_range_expands_after_forward_pass(adapter: KANLoRALinear) -> None:

@@ -56,7 +56,7 @@ def set_seed(seed: int) -> None:
 
 
 def _mean_fraction_inside_grid(model: torch.nn.Module) -> float | None:
-    values = [module.last_fraction_inside_grid() for _, module in adapter_modules(model)]
+    values = [module.mean_fraction_inside_grid() for _, module in adapter_modules(model)]
     present = [value for value in values if value is not None]
     return sum(present) / len(present) if present else None
 
@@ -99,6 +99,11 @@ def train(
     for epoch in range(train_config.epochs):
         epoch_total, epoch_batches = 0.0, 0
         bundle.zero_grad()
+        # Доля активаций в сетке — среднее за эпоху, а не за весь прогон: на
+        # графике по эпохам виден дрейф, и на последний микробатч значение не
+        # опирается.
+        for _, module in adapter_modules(model):
+            module.reset_fraction_inside_grid()
 
         for index, batch in enumerate(loader, start=1):
             batch = {key: value.to(device) for key, value in batch.items()}

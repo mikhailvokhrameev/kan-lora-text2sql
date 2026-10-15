@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from kanlora.adapters.base import AdapterConfig
-from kanlora.adapters.inject import inject_adapters
+from kanlora.adapters.inject import adapter_modules, inject_adapters
 from kanlora.data.collate import IGNORE_INDEX, Collator
 from kanlora.train.loop import TrainConfig, set_seed, train
 from kanlora.train.optimizers import OptimizerConfig
@@ -155,6 +155,49 @@ def test_reports_fraction_inside_grid_per_epoch(tiny_causal_lm) -> None:
 
     assert len(report.fraction_inside_grid) == 3
     assert all(0.0 <= value <= 1.0 for value in report.fraction_inside_grid)
+
+
+@pytest.mark.slow
+def test_fraction_inside_grid_is_the_epoch_mean_not_the_last_microbatch(
+    tiny_causal_lm,
+) -> None:
+    """Значение за эпоху — среднее по всем проходам эпохи; сброс в начале каждой эпохи."""
+    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
+    adapters = [module for _, module in adapter_modules(tiny_causal_lm)]
+
+    # Запись долей, которые адаптеры видят на каждом проходе, по порядку вызовов.
+    recorded: list[list[float]] = [[] for _ in adapters]
+    for values, module in zip(recorded, adapters):
+        original = module.kan.fraction_inside_grid
+
+        def spy(x, original=original, values=values):
+            fraction = original(x)
+            values.append(fraction.item())
+            return fraction
+
+        module.kan.fraction_inside_grid = spy
+
+    epochs, batches_per_epoch = 3, 5  # 20 примеров по 4, без накопления и чекпоинтинга
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
+        train_config=TrainConfig(epochs=epochs, batch_size=4, gradient_accumulation=1,
+                                 gradient_checkpointing=False),
+        device=DEVICE,
+    )
+
+    expected, last_microbatch = [], []
+    for epoch in range(epochs):
+        window = slice(epoch * batches_per_epoch, (epoch + 1) * batches_per_epoch)
+        per_adapter = [sum(values[window]) / batches_per_epoch for values in recorded]
+        expected.append(sum(per_adapter) / len(per_adapter))
+        last_microbatch.append(sum(values[window][-1] for values in recorded) / len(recorded))
+
+    assert len(report.fraction_inside_grid) == epochs
+    assert report.fraction_inside_grid == pytest.approx(expected)
+    assert report.fraction_inside_grid != pytest.approx(last_microbatch)
 
 
 @pytest.mark.slow

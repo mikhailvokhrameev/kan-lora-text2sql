@@ -142,7 +142,7 @@ def model_nonlinearity(
                 lo, hi = float("-inf"), float("inf")
 
         values = [item.nonlinearity for item in layer_nonlinearity(module.kan, lo, hi)]
-        fraction = module.last_fraction_inside_grid()
+        fraction = module.mean_fraction_inside_grid()
         summary[name] = {
             "mean": sum(values) / len(values) if values else float("nan"),
             "max": max(values) if values else float("nan"),
