@@ -34,6 +34,7 @@ __all__ = [
     "build_prompt",
     "build_prompts",
     "encode",
+    "truncate_prompt",
 ]
 
 IGNORE_INDEX = -100
@@ -44,6 +45,11 @@ SYSTEM_PROMPT = (
 )
 
 USER_TEMPLATE = "Database schema:\n{schema}\n\nQuestion: {question}"
+
+# Текст шаблона по обе стороны схемы: по ним truncate_prompt находит схему в
+# готовом промпте и режет только её.
+_SCHEMA_OPEN, _, _AFTER_SCHEMA = USER_TEMPLATE.partition("{schema}")
+_SCHEMA_CLOSE = _AFTER_SCHEMA.partition("{question}")[0]
 
 
 def build_messages(question: str, schema_text: str) -> list[dict[str, str]]:
@@ -66,6 +72,43 @@ def build_prompt(question: str, schema_text: str, tokenizer) -> str:
     )
 
 
+def _token_ids(tokenizer, text: str) -> list[int]:
+    return tokenizer(text, add_special_tokens=False)["input_ids"]
+
+
+def truncate_prompt(tokenizer, prompt: str, budget: int) -> list[int]:
+    """Токены промпта, усечённые до budget по одному правилу для обучения и оценки.
+
+    Промпт, который помещается, токенизируется целиком и не меняется. Иначе
+    режется голова схемы: системная реплика, открытие реплики user, вопрос и
+    открытие реплики assistant остаются нетронутыми. Для этого промпт делится
+    по тексту шаблона вокруг схемы на три куска, каждый токенизируется
+    отдельно, и у схемы отбрасываются первые токены.
+
+    Запасной путь — усечение головы: если схемы в промпте нет (промпт построен
+    не build_prompt) или не помещается даже промпт без схемы, остаются
+    последние budget токенов того, что есть.
+    """
+    ids = _token_ids(tokenizer, prompt)
+    if len(ids) <= budget:
+        return ids
+    if budget <= 0:
+        return []
+
+    start = prompt.find(_SCHEMA_OPEN)
+    end = prompt.find(_SCHEMA_CLOSE, start + len(_SCHEMA_OPEN)) if start >= 0 else -1
+    if end < 0:
+        return ids[-budget:]
+
+    start += len(_SCHEMA_OPEN)
+    head = _token_ids(tokenizer, prompt[:start])
+    schema = _token_ids(tokenizer, prompt[start:end])
+    tail = _token_ids(tokenizer, prompt[end:])
+    room = budget - len(head) - len(tail)
+    kept = schema[-room:] if room > 0 else []
+    return (head + kept + tail)[-budget:]
+
+
 def encode(tokenizer, prompt: str, target: str, max_length: int) -> dict[str, list[int]]:
     """Токенизирует пару и маскирует токены промпта.
 
@@ -74,11 +117,11 @@ def encode(tokenizer, prompt: str, target: str, max_length: int) -> dict[str, li
     строки, который шаблон ставит после <|im_end|>, не добавляется: после
     конца реплики учить нечему.
 
-    При переполнении режется голова промпта: запрос обязан уцелеть целиком,
-    иначе обучающая пара становится неверной, не вызвав ошибки.
+    При переполнении усекается промпт (truncate_prompt — то же правило, что
+    у генерации на оценке): запрос обязан уцелеть целиком, иначе обучающая
+    пара становится неверной, не вызвав ошибки.
     """
-    prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-    target_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [
+    target_ids = _token_ids(tokenizer, target) + [
         tokenizer.eos_token_id
     ]
 
@@ -88,8 +131,7 @@ def encode(tokenizer, prompt: str, target: str, max_length: int) -> dict[str, li
             f"(требуется {len(target_ids)}); увеличьте max_length"
         )
 
-    room = max_length - len(target_ids)
-    prompt_ids = prompt_ids[-room:] if room > 0 else []
+    prompt_ids = truncate_prompt(tokenizer, prompt, max_length - len(target_ids))
 
     return {
         "input_ids": prompt_ids + target_ids,

@@ -204,7 +204,8 @@ def write_result_card(card: dict, directory: Path) -> Path
    усечений искажает метрику сильнее, чем сам метод адаптации.
 7. `train()` (`docs/train-loop.md`) обучает модель и возвращает `TrainReport`.
 8. `generate_sql` (`docs/generate.md`) генерирует ответы на отложенной
-   выборке; Exact Match считается официальной метрикой Spider
+   выборке, усекая промпты до `config.max_length - config.max_new_tokens`
+   по тому же правилу, что и `build_dataset` при обучении; Exact Match считается официальной метрикой Spider
    (`exact_match_by_hardness`, `docs/exact_match.md`) по `tables.json`.
 9. Execution Accuracy считается, если хотя бы для одной из уникальных
    `db_id` отложенной выборки на диске нашёлся файл базы

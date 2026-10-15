@@ -17,6 +17,7 @@ from kanlora.data.collate import (
     build_prompt,
     build_prompts,
     encode,
+    truncate_prompt,
 )
 from kanlora.data.loaders import Text2SqlExample
 from kanlora.data.schema import DatabaseSchema, Table
@@ -145,6 +146,60 @@ def test_truncation_cuts_the_prompt_and_keeps_the_target(tokenizer: FakeTokenize
     assert encoded["labels"][-len(target_ids) :] == target_ids
 
 
+def _ids(text: str) -> list[int]:
+    return [ord(character) for character in text]
+
+
+def test_truncation_cuts_the_schema_head_and_keeps_the_frame(tokenizer: FakeTokenizer) -> None:
+    """Режется голова схемы: системная реплика, разметка шаблона и вопрос уцелевают.
+
+    Иначе при усечении по голове всего промпта модель теряла бы инструкцию и
+    открытие реплики user и видела бы промпт, какого шаблон не порождает.
+    """
+    schema = " | ".join(f"table_{index}: id, name" for index in range(30))
+    prompt = build_prompt("How many?", schema, tokenizer)
+    head, _, rest = prompt.partition(schema)
+    budget = len(prompt) - 100
+
+    ids = truncate_prompt(tokenizer, prompt, budget)
+
+    assert len(ids) == budget
+    assert ids == _ids(head) + _ids(schema[100:]) + _ids(rest)
+    system_turn = f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n"
+    assert ids[: len(system_turn)] == _ids(system_turn)
+    assert ids[-len(rest) :] == _ids("\n\nQuestion: How many?<|im_end|>\n<|im_start|>assistant\n")
+
+
+def test_prompt_that_fits_is_not_touched(tokenizer: FakeTokenizer) -> None:
+    prompt = build_prompt("q", "t: a", tokenizer)
+    assert truncate_prompt(tokenizer, prompt, len(prompt)) == _ids(prompt)
+
+
+def test_encode_applies_the_schema_truncation(tokenizer: FakeTokenizer) -> None:
+    """encode усекает промпт той же функцией, что и генерация на оценке."""
+    prompt = build_prompt("q", " | ".join(f"t{index}: a" for index in range(60)), tokenizer)
+    encoded = encode(tokenizer, prompt, "SELECT", max_length=400)
+
+    room = 400 - len("SELECT") - 1
+    assert encoded["input_ids"][:room] == truncate_prompt(tokenizer, prompt, room)
+    assert encoded["input_ids"][: len("<|im_start|>system")] == _ids("<|im_start|>system")
+
+
+def test_frame_longer_than_budget_falls_back_to_head_truncation(
+    tokenizer: FakeTokenizer,
+) -> None:
+    """Если не помещается даже рамка с вопросом, режется голова того, что осталось без схемы."""
+    prompt = build_prompt("q", "t: a, b, c", tokenizer)
+    head, _, rest = prompt.partition("t: a, b, c")
+
+    assert truncate_prompt(tokenizer, prompt, 20) == _ids(head + rest)[-20:]
+    assert truncate_prompt(tokenizer, prompt, 0) == []
+
+
+def test_prompt_without_schema_falls_back_to_head_truncation(tokenizer: FakeTokenizer) -> None:
+    assert truncate_prompt(tokenizer, "P" * 10 + "Q" * 5, 5) == _ids("Q" * 5)
+
+
 def test_target_longer_than_limit_raises(tokenizer: FakeTokenizer) -> None:
     """Молча выбросить часть запроса нельзя — это тихая порча обучающих данных."""
     with pytest.raises(ValueError, match="не помещается"):
@@ -223,3 +278,19 @@ def test_eval_prompt_is_a_prefix_of_the_training_sequence(qwen_tokenizer) -> Non
 
     supervised = [label for label in encoded["labels"] if label != IGNORE_INDEX]
     assert qwen_tokenizer.decode(supervised) == sql + "<|im_end|>"
+
+
+def test_truncated_qwen_prompt_keeps_the_chat_frame(qwen_tokenizer) -> None:
+    """На настоящем токенизаторе усечённый промпт сохраняет системную реплику,
+    вопрос и открытие ответа assistant, а режется только голова схемы."""
+    schema = " | ".join(f"table_{index}: id, name, value" for index in range(60))
+    prompt = build_prompt("How many singers?", schema, qwen_tokenizer)
+    full = qwen_tokenizer(prompt, add_special_tokens=False)["input_ids"]
+
+    ids = truncate_prompt(qwen_tokenizer, prompt, len(full) // 2)
+    text = qwen_tokenizer.decode(ids)
+
+    assert len(ids) == len(full) // 2
+    assert text.startswith(f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n")
+    assert text.endswith("\n\nQuestion: How many singers?<|im_end|>\n<|im_start|>assistant\n")
+    assert "table_59: id, name, value" in text and "table_0:" not in text

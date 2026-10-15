@@ -113,7 +113,7 @@ def main() -> int:
     predicted = generate_sql(
         model, tokenizer, build_prompts(eval_examples, schemas, tokenizer),
         device=device, batch_size=config.eval_batch_size,
-        max_new_tokens=config.max_new_tokens,
+        max_new_tokens=config.max_new_tokens, max_length=config.max_length,
     )
     gold = [example.query for example in eval_examples]
     db_ids = [example.db_id for example in eval_examples]

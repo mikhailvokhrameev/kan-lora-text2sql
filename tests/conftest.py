@@ -51,8 +51,15 @@ class TinyTokenizer:
         return [ord(character) % VOCAB_SIZE for character in text]
 
     def __call__(
-        self, texts: list[str], return_tensors: str = "pt", padding: bool = True
-    ) -> BatchEncoding:
+        self,
+        texts: str | list[str],
+        return_tensors: str | None = None,
+        padding: bool = True,
+        add_special_tokens: bool = True,
+    ):
+        if isinstance(texts, str):
+            # Одна строка без тензоров — как tokenizer(text)["input_ids"] у настоящего.
+            return {"input_ids": self._encode_one(texts)}
         assert return_tensors == "pt"
         sequences = [self._encode_one(text) for text in texts]
         width = max(len(sequence) for sequence in sequences)
@@ -77,6 +84,19 @@ class TinyTokenizer:
                 "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
             }
         )
+
+    def apply_chat_template(
+        self, messages, tokenize: bool = True, add_generation_prompt: bool = False
+    ) -> str:
+        """Разметка ChatML, как у Qwen2.5 (и как у FakeTokenizer в test_collate.py)."""
+        assert not tokenize
+        text = "".join(
+            f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n"
+            for message in messages
+        )
+        if add_generation_prompt:
+            text += "<|im_start|>assistant\n"
+        return text
 
     def batch_decode(self, sequences: torch.Tensor, skip_special_tokens: bool = True) -> list[str]:
         texts = []
