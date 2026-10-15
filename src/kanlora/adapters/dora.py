@@ -9,6 +9,12 @@
 При инициализации m равен норме исходного веса, а B = 0, поэтому
 m * W / ||W|| в точности равно W и модель стартует немодифицированной —
 как и два других сравниваемых метода.
+
+Норма ||V|| в знаменателе отсоединена от графа (detach), то есть при обратном
+проходе считается константой: так предложено в разд. 4.3 статьи DoRA (Liu et
+al., 2024) ради экономии памяти и так сделано в PEFT. Градиент сохраняют
+модуль m и числитель V. На значения прямого прохода и на слияние detach не
+влияет, меняются только градиенты.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ class DoRALinear(AdapterLinear):
 
     def effective_weight(self) -> torch.Tensor:
         direction = self.base.weight + self.scaling * (self.lora_b @ self.lora_a)
-        norm = direction.norm(dim=1, keepdim=True)
+        norm = direction.norm(dim=1, keepdim=True).detach()
         return self.magnitude.unsqueeze(1) * direction / norm
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
