@@ -68,6 +68,13 @@ def generate_sql(
     batch_size: int = 8,
     max_new_tokens: int = 128,
 ) -> list[str]:
+    """Жадно генерирует SQL для готовых промптов.
+
+    Промпты строит kanlora.data.collate.build_prompts — та же функция, что и
+    при обучении: шаблон диалога токенизатора с add_generation_prompt=True.
+    Генерация обрывается на tokenizer.eos_token_id (у Qwen2.5-Instruct это
+    <|im_end|>, конец реплики), которым encode завершает ответ при обучении.
+    """
     model.to(device)
     model.eval()
     model.config.use_cache = True

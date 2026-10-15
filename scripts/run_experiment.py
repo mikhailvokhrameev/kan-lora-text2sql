@@ -111,7 +111,7 @@ def main() -> int:
     )
 
     predicted = generate_sql(
-        model, tokenizer, build_prompts(eval_examples, schemas),
+        model, tokenizer, build_prompts(eval_examples, schemas, tokenizer),
         device=device, batch_size=config.eval_batch_size,
         max_new_tokens=config.max_new_tokens,
     )

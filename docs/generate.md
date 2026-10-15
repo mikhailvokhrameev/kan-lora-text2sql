@@ -67,6 +67,20 @@ def generate_sql(
 5. Продолжение декодируется пакетно (`batch_decode`, `skip_special_tokens=
    True`) и прогоняется через `normalize_sql`.
 
+**Откуда промпты и где генерация останавливается.** `generate_sql`
+принимает уже готовые строки промптов и сам их не строит. Строит их
+`build_prompts` из `src/kanlora/data/collate.py` — та же функция
+`build_prompt`, что и при обучении: шаблон диалога токенизатора
+(`apply_chat_template`) с `add_generation_prompt=True`, то есть промпт
+обрывается на `<|im_start|>assistant\n` (`docs/collate.md`). В эксперименте
+это связывает `scripts/run_experiment.py`. Генерация останавливается на
+`eos_token_id=tokenizer.eos_token_id`; у Qwen2.5-Instruct это `<|im_end|>`
+(id 151645) — конец реплики, которым `encode` завершает ответ при обучении.
+Явная передача `eos_token_id` заменяет список из `generation_config.json`
+модели (`[151645, 151643]`, т. е. ещё и `<|endoftext|>`) одним
+`<|im_end|>`. Сам `<|im_end|>` в ответ не попадает: `batch_decode` идёт с
+`skip_special_tokens=True`.
+
 **Почему дополнение обязано быть слева.** При генерации у causal-модели
 следующий токен предсказывается по последней позиции последовательности.
 Если дополнять справа, то у более коротких промптов в пакете последняя
@@ -106,6 +120,9 @@ from_pretrained` требует сети.
   `test_does_not_cut_at_newline_inside_quoted_string`) кавычек, а
   экранированная кавычка (`\'`) не закрывает строковый литерал раньше
   времени (`test_escaped_quote_does_not_end_the_string`).
+- `generate_sql` передаёт в `model.generate` `eos_token_id` токенизатора и
+  `do_sample=False` (`test_generation_stops_at_the_tokenizer_eos`, заглушка
+  модели, без сети и без обучения).
 - `generate_sql` возвращает ровно одну строку на каждый промпт
   (`test_generates_one_string_per_prompt`).
 - Результат не зависит от размера батча: генерация по одному промпту за раз

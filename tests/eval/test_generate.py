@@ -70,3 +70,31 @@ def test_batching_does_not_change_the_result(tiny_causal_lm, tiny_tokenizer) -> 
     one_by_one = generate_sql(tiny_causal_lm, tiny_tokenizer, prompts, batch_size=1, **common)
     batched = generate_sql(tiny_causal_lm, tiny_tokenizer, prompts, batch_size=3, **common)
     assert one_by_one == batched
+
+
+class _RecordingModel:
+    """Заглушка модели: запоминает аргументы generate и ничего не дописывает."""
+
+    def __init__(self) -> None:
+        self.config = type("Config", (), {"use_cache": False})()
+        self.calls: list[dict] = []
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+    def generate(self, input_ids, attention_mask, **kwargs):
+        self.calls.append(kwargs)
+        return input_ids
+
+
+def test_generation_stops_at_the_tokenizer_eos(tiny_tokenizer) -> None:
+    """Генерация обрывается на eos_token_id токенизатора — у Qwen2.5-Instruct это <|im_end|>,
+    тем же токеном collate.encode завершает ответ при обучении."""
+    model = _RecordingModel()
+    generate_sql(model, tiny_tokenizer, ["SELECT"], device=torch.device("cpu"))
+
+    assert model.calls[0]["eos_token_id"] == tiny_tokenizer.eos_token_id
+    assert model.calls[0]["do_sample"] is False

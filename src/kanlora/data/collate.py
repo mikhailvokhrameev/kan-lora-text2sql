@@ -1,8 +1,15 @@
 """Промпт, токенизация, маска функции потерь и сборка батча.
 
-Функция потерь считается только по токенам SQL-запроса: токены промпта
-получают IGNORE_INDEX. Без этого модель училась бы воспроизводить схему базы,
-и ошибка не выдала бы себя ничем — обучение бы шло, метрики бы считались.
+Промпт строится шаблоном диалога самого токенизатора (apply_chat_template):
+Instruct-модель дообучалась именно на этой разметке, и свой формат без неё
+занизил бы и базовую модель, и стартовую точку всех трёх методов адаптации.
+Одна и та же функция build_prompt строит промпт и для обучения, и для оценки.
+
+Функция потерь считается только по токенам ответа assistant (SQL-запрос) и
+завершающему его концу реплики: системная и пользовательская реплики и
+разметка шаблона получают IGNORE_INDEX. Без этого модель училась бы
+воспроизводить схему базы, и ошибка не выдала бы себя ничем — обучение бы
+шло, метрики бы считались.
 
 Рамка промпта одна и та же для Spider и для PAUQ, чтобы различие между
 наборами сводилось к языку вопроса, а не к оформлению.
@@ -19,9 +26,11 @@ from kanlora.data.schema import DatabaseSchema, serialize_schema
 
 __all__ = [
     "IGNORE_INDEX",
-    "PROMPT_TEMPLATE",
+    "SYSTEM_PROMPT",
+    "USER_TEMPLATE",
     "Collator",
     "build_dataset",
+    "build_messages",
     "build_prompt",
     "build_prompts",
     "encode",
@@ -29,15 +38,41 @@ __all__ = [
 
 IGNORE_INDEX = -100
 
-PROMPT_TEMPLATE = "Database schema:\n{schema}\n\nQuestion: {question}\n\nSQL:\n"
+SYSTEM_PROMPT = (
+    "Translate the question into a SQL query for the given database schema. "
+    "Answer with the SQL query only."
+)
+
+USER_TEMPLATE = "Database schema:\n{schema}\n\nQuestion: {question}"
 
 
-def build_prompt(question: str, schema_text: str) -> str:
-    return PROMPT_TEMPLATE.format(schema=schema_text, question=question)
+def build_messages(question: str, schema_text: str) -> list[dict[str, str]]:
+    """Реплики system и user; ответ assistant (SQL) сюда не входит."""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": USER_TEMPLATE.format(schema=schema_text, question=question)},
+    ]
+
+
+def build_prompt(question: str, schema_text: str, tokenizer) -> str:
+    """Промпт шаблоном диалога токенизатора, оборванный на начале ответа assistant.
+
+    add_generation_prompt=True дописывает открытие реплики assistant: с этого
+    места модель пишет SQL и на оценке, и при обучении (encode дописывает к
+    этой же строке ответ и конец реплики).
+    """
+    return tokenizer.apply_chat_template(
+        build_messages(question, schema_text), tokenize=False, add_generation_prompt=True
+    )
 
 
 def encode(tokenizer, prompt: str, target: str, max_length: int) -> dict[str, list[int]]:
     """Токенизирует пару и маскирует токены промпта.
+
+    Последовательность — промпт, ответ и eos_token_id; у Qwen2.5-Instruct это
+    <|im_end|>, конец реплики, на котором останавливается генерация. Перевод
+    строки, который шаблон ставит после <|im_end|>, не добавляется: после
+    конца реплики учить нечему.
 
     При переполнении режется голова промпта: запрос обязан уцелеть целиком,
     иначе обучающая пара становится неверной, не вызвав ошибки.
@@ -63,10 +98,10 @@ def encode(tokenizer, prompt: str, target: str, max_length: int) -> dict[str, li
 
 
 def build_prompts(
-    examples: Sequence[Text2SqlExample], schemas: dict[str, DatabaseSchema]
+    examples: Sequence[Text2SqlExample], schemas: dict[str, DatabaseSchema], tokenizer
 ) -> list[str]:
     return [
-        build_prompt(example.question, serialize_schema(schemas[example.db_id]))
+        build_prompt(example.question, serialize_schema(schemas[example.db_id]), tokenizer)
         for example in examples
     ]
 
@@ -82,7 +117,7 @@ def build_dataset(
     Число усечений идёт в карточку результата: если оно велико, часть схем
     не доехала до модели, и это влияет на метрику сильнее, чем метод адаптации.
     """
-    prompts = build_prompts(examples, schemas)
+    prompts = build_prompts(examples, schemas, tokenizer)
 
     dataset: list[dict[str, list[int]]] = []
     truncated = 0
