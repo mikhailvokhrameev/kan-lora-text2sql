@@ -32,6 +32,7 @@ class ExperimentConfig:
     seed: int
     train_subset: int
     subsample_seed: int
+    validation_size: int
     max_length: int
     eval_limit: int | None
     eval_batch_size: int
@@ -53,6 +54,11 @@ class ExperimentConfig:
 обучающую выборку, и обязан быть одним и тем же для всех методов и всех трёх
 зёрен обучения — иначе разница в качестве между методами частично
 объяснялась бы разными обучающими данными, а не самим методом.
+
+`validation_size` (200) — размер валидационной выборки из train вне обучающей
+подвыборки, по тому же `subsample_seed` (`validation_subsample`,
+`docs/data.md`). На ней цикл обучения считает функцию потерь на шаге 0 и
+после каждой эпохи (`docs/train-loop.md`).
 
 ### `method` и базовая модель без адаптера (`none`)
 
@@ -188,7 +194,7 @@ Execution Accuracy; `spline_stats` — сводка `model_nonlinearity`
 (хотя замороженная `config` по-прежнему содержит секцию `optimizer` из
 YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
 видеопамяти — величина обучения, на оценке не замеряется),
-`optimizer_coverage`, `step_losses`, `epoch_losses`,
+`optimizer_coverage`, `step_losses`, `epoch_losses`, `validation_losses`,
 `fraction_inside_grid`, `spline_stats`; `adapted_modules` равно 0,
 `metrics.truncated_prompts` — `null` (обучающая выборка не кодируется).
 `null` здесь значит «не применимо: не обучалась», а не ноль — по тому же
@@ -198,7 +204,9 @@ YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
 
 Карточка несёт из `train_report` оба ряда функции потерь: `step_losses` —
 значение на каждом шаге оптимизатора (после накопления градиента), и
-`epoch_losses` — среднее за эпоху. Без `step_losses` в карточке нельзя
+`epoch_losses` — среднее за эпоху. Третий ряд — `validation_losses`:
+функция потерь на валидационной выборке на шаге 0 и после каждой эпохи.
+Без `step_losses` в карточке нельзя
 отличить гладкое обучение от скачков внутри эпохи, усреднение до одного
 числа на эпоху эту информацию стирает необратимо.
 
@@ -233,14 +241,17 @@ def write_result_card(card: dict, directory: Path) -> Path
    инициализация адаптеров были воспроизводимы по зерну прогона.
 3. Схемы баз и примеры читаются `kanlora.data.loaders` по раскладке
    (`LAYOUTS[config.dataset]`); обучающая выборка урезается `subsample` до
-   `config.train_subset` по `config.subsample_seed`; отложенная выборка
+   `config.train_subset` по `config.subsample_seed`, валидационная —
+   `validation_subsample` до `config.validation_size` из оставшихся примеров
+   train по тому же зерну (для `method: none` обе пусты); отложенная выборка
    урезается до `config.eval_limit`, если он задан (`None` — весь набор).
 4. Модель грузится **явно в fp32** (`AutoModelForCausalLM.from_pretrained(...,
    dtype=torch.float32)`) — сравнение по видеопамяти между методами
    осмысленно только при одинаковой точности (см. «Global Constraints»
    плана), а не потому что fp32 быстрее или удобнее.
 5–7. Шаги адаптации и обучения собраны в `adapt_and_train(config, model,
-   tokenizer, train_examples, schemas, device)`, которая возвращает
+   tokenizer, train_examples, schemas, device, validation_examples=())`,
+   которая возвращает
    `(injection, report, truncated)`:
    - `inject_adapters` подменяет семь целевых проекций и печатает число
      обучаемых параметров и число затронутых слоёв — первая проверка
@@ -248,8 +259,10 @@ def write_result_card(card: dict, directory: Path) -> Path
    - `build_dataset` кодирует обучающую выборку и сообщает число усечённых
      промптов; при усечении печатается предупреждение — большая доля
      усечений искажает метрику сильнее, чем сам метод адаптации;
-   - `train()` (`docs/train-loop.md`) обучает модель и возвращает
-     `TrainReport`.
+   - валидационные примеры кодируются тем же `build_dataset` (их усечения
+     в счётчик `truncated` не входят);
+   - `train()` (`docs/train-loop.md`) обучает модель, считает функцию потерь
+     на валидации на шаге 0 и после каждой эпохи и возвращает `TrainReport`.
 
    Для `method: none` функция ничего из этого не делает: печатает число
    параметров модели и возвращает `({"trainable_parameters": None,

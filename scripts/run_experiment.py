@@ -31,7 +31,7 @@ from kanlora.analysis.spline_stats import model_nonlinearity  # noqa: E402
 from kanlora.config import METHODS, apply_overrides, load_config  # noqa: E402
 from kanlora.data.collate import Collator, build_dataset, build_prompts  # noqa: E402
 from kanlora.data.loaders import (  # noqa: E402
-    LAYOUTS, load_dataset_schemas, load_examples, subsample,
+    LAYOUTS, load_dataset_schemas, load_examples, subsample, validation_subsample,
 )
 from kanlora.eval.exact_match import exact_match_by_hardness  # noqa: E402
 from kanlora.eval.execution import count_available_databases, execution_accuracy  # noqa: E402
@@ -62,8 +62,13 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def adapt_and_train(config, model, tokenizer, train_examples, schemas, device):
+def adapt_and_train(
+    config, model, tokenizer, train_examples, schemas, device, validation_examples=(),
+):
     """Внедряет адаптеры и обучает; возвращает (injection, report, truncated).
+
+    Валидационные примеры кодируются тем же `build_dataset`, что и обучающие;
+    их усечённые промпты в счётчик `truncated` не входят.
 
     Для `method: none` ничего не делает: модель остаётся исходной, обучаемых
     параметров, отчёта обучения и счётчика усечённых обучающих промптов нет
@@ -84,6 +89,10 @@ def adapt_and_train(config, model, tokenizer, train_examples, schemas, device):
     if truncated:
         print(f"внимание: усечено промптов: {truncated} из {len(dataset)}")
 
+    validation_dataset, _ = build_dataset(
+        list(validation_examples), schemas, tokenizer, config.max_length
+    )
+
     report = train(
         model=model,
         dataset=dataset,
@@ -91,6 +100,7 @@ def adapt_and_train(config, model, tokenizer, train_examples, schemas, device):
         optimizer_config=config.optimizer,
         train_config=config.train,
         device=device,
+        validation_dataset=validation_dataset,
     )
     injection_info = {
         "trainable_parameters": injection.trainable_parameters,
@@ -121,13 +131,13 @@ def main() -> int:
     layout = LAYOUTS[config.dataset]
     schemas = load_dataset_schemas(root, layout)
 
-    train_examples = (
-        []
-        if config.method == "none"
-        else subsample(
-            load_examples(root, layout, "train"), config.train_subset, config.subsample_seed
+    train_examples, validation_examples = [], []
+    if config.method != "none":
+        all_train = load_examples(root, layout, "train")
+        train_examples = subsample(all_train, config.train_subset, config.subsample_seed)
+        validation_examples = validation_subsample(
+            all_train, config.train_subset, config.validation_size, config.subsample_seed
         )
-    )
     eval_examples = load_examples(root, layout, "eval")
     if config.eval_limit is not None:
         eval_examples = eval_examples[: config.eval_limit]
@@ -140,7 +150,7 @@ def main() -> int:
     # осмысленно только при одинаковой точности.
     model = AutoModelForCausalLM.from_pretrained(config.model_name, dtype=torch.float32)
     injection, report, truncated = adapt_and_train(
-        config, model, tokenizer, train_examples, schemas, device
+        config, model, tokenizer, train_examples, schemas, device, validation_examples
     )
 
     predicted = generate_sql(

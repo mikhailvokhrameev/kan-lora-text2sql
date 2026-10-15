@@ -33,6 +33,8 @@ class ExperimentConfig:
     seed: int
     train_subset: int
     subsample_seed: int
+    # Валидация — примеры train вне обучающей подвыборки, то же subsample_seed.
+    validation_size: int
     max_length: int
     eval_limit: int | None
     eval_batch_size: int
@@ -69,6 +71,7 @@ def load_config(path: Path) -> ExperimentConfig:
         seed=raw["seed"],
         train_subset=raw["train_subset"],
         subsample_seed=raw["subsample_seed"],
+        validation_size=raw["validation_size"],
         max_length=raw["max_length"],
         eval_limit=raw["eval_limit"],
         eval_batch_size=raw["eval_batch_size"],

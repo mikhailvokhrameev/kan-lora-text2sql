@@ -18,6 +18,7 @@ from kanlora.data.loaders import (
     load_dataset_schemas,
     load_examples,
     subsample,
+    validation_subsample,
 )
 from kanlora.data.pauq import PAUQ_LAYOUT
 from kanlora.data.spider import SPIDER_LAYOUT
@@ -98,6 +99,38 @@ def test_subsample_does_not_depend_on_the_training_seed() -> None:
 def test_subsample_keeps_everything_when_size_exceeds_the_set() -> None:
     examples = load_examples(ROOT, SPIDER_LAYOUT, "train")
     assert subsample(examples, 100, seed=0) == examples
+
+
+def _numbered_examples(count: int) -> list[Text2SqlExample]:
+    return [Text2SqlExample(db_id="db", question=f"q{i}", query=f"SELECT {i}") for i in range(count)]
+
+
+def test_validation_subsample_does_not_overlap_the_training_subsample() -> None:
+    """Валидационная функция потерь честна, только если её примеров не было в обучении."""
+    examples = _numbered_examples(50)
+    training = subsample(examples, 20, seed=7)
+    validation = validation_subsample(examples, train_size=20, size=10, seed=7)
+
+    assert len(validation) == 10
+    assert not set(validation) & set(training)
+
+
+def test_validation_subsample_is_reproducible_and_leaves_training_untouched() -> None:
+    """Та же обучающая подвыборка, что и без валидации: методика обучения не меняется."""
+    examples = _numbered_examples(50)
+    before = subsample(examples, 20, seed=7)
+
+    first = validation_subsample(examples, train_size=20, size=10, seed=7)
+    assert first == validation_subsample(examples, train_size=20, size=10, seed=7)
+    assert subsample(examples, 20, seed=7) == before
+
+
+def test_validation_subsample_takes_what_is_left_when_short() -> None:
+    examples = _numbered_examples(25)
+    validation = validation_subsample(examples, train_size=20, size=10, seed=7)
+    assert len(validation) == 5
+    assert not set(validation) & set(subsample(examples, 20, seed=7))
+    assert validation_subsample(examples, train_size=25, size=10, seed=7) == []
 
 
 def test_pauq_examples_read_the_russian_side_of_bilingual_fields() -> None:

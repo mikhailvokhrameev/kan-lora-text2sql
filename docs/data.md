@@ -164,6 +164,35 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
 `(examples, size, seed)` и не зависит ни от какого глобального генератора
 случайных чисел.
 
+## Валидационная выборка (`validation_subsample`)
+
+```python
+def validation_subsample(
+    examples: list[Text2SqlExample], train_size: int, size: int, seed: int
+) -> list[Text2SqlExample]
+```
+
+Отдельной валидационной выборки в Spider и PAUQ нет, а dev служит тестовой
+(на ней считаются Exact Match и Execution Accuracy), поэтому подбирать
+что-либо по dev нельзя (учебник, §3.7). Валидация берётся из train: из
+примеров, **не вошедших** в обучающую подвыборку.
+
+Алгоритм:
+
+1. Если `train_size >= len(examples)`, вся train уже обучающая, и
+   возвращается пустой список (валидационная функция потерь не считается).
+2. Индексы обучающей подвыборки восстанавливаются тем же вызовом
+   `random.Random(seed).sample(range(len(examples)), train_size)`, что и в
+   `subsample`. Отдельного состояния нет: обучающая подвыборка совпадает с
+   той, что была до появления валидации, и методика обучения не меняется.
+3. Из оставшихся индексов выбирается `size` штук через
+   `random.Random(seed).sample(...)` (то же `subsample_seed`), индексы
+   сортируются; если оставшихся меньше `size`, берутся все.
+
+Размер задаётся в конфигурации полем `validation_size` (200 в `base.yaml`
+и `smoke.yaml`). Выборка одна для всех методов и всех зёрен обучения — по
+той же причине, что и обучающая подвыборка.
+
 ## Проверенные инварианты
 
 - `load_schemas` группирует столбцы по таблицам в порядке исходного файла
@@ -194,6 +223,12 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
   (`test_subsample_does_not_depend_on_the_training_seed`), а запрошенный
   размер, превышающий выборку, возвращает выборку целиком
   (`test_subsample_keeps_everything_when_size_exceeds_the_set`).
+- Валидационная выборка не пересекается с обучающей подвыборкой
+  (`test_validation_subsample_does_not_overlap_the_training_subsample`),
+  воспроизводима и не меняет обучающую подвыборку
+  (`test_validation_subsample_is_reproducible_and_leaves_training_untouched`),
+  а при нехватке примеров берёт все оставшиеся
+  (`test_validation_subsample_takes_what_is_left_when_short`).
 
 ## Не реализовано
 

@@ -7,6 +7,8 @@
 исключения сама по себе.
 """
 
+import copy
+
 import pytest
 import torch
 
@@ -289,3 +291,63 @@ def test_report_carries_timing_memory_and_coverage(tiny_causal_lm) -> None:
     assert report.peak_memory_bytes == 0  # на процессоре замера нет, и это честно видно
     assert report.optimizer_coverage["muon"] > 0
     assert len(report.step_losses) == 5
+
+
+def test_validation_loss_is_measured_at_step_zero_and_after_every_epoch(tiny_causal_lm) -> None:
+    """Учебник §3.7 и лекция 5 MLOps: кривая на валидации начинается с шага 0.
+
+    Значение на шаге 0 — функция потерь ещё не обученной модели; после
+    обучения на тех же примерах (переобучение на 20 примерах) она падает.
+    """
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+    validation = twenty_examples(seed=1)[:6]
+    collator = Collator(pad_token_id=0)
+
+    tiny_causal_lm.eval()
+    with torch.no_grad():
+        # Та же разбивка на батчи, что у цикла (batch_size=4): 4 + 2 примера.
+        untrained = [
+            tiny_causal_lm(**collator(validation[start:start + 4])).loss.item()
+            for start in (0, 4)
+        ]
+
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=collator,
+        optimizer_config=OptimizerConfig(learning_rate=1e-2),
+        train_config=TrainConfig(epochs=3, batch_size=4, gradient_accumulation=1,
+                                 gradient_checkpointing=False),
+        device=DEVICE,
+        validation_dataset=validation,
+    )
+
+    assert len(report.validation_losses) == 3 + 1
+    assert report.validation_losses[0] == pytest.approx(sum(untrained) / len(untrained))
+    assert all(isinstance(value, float) for value in report.validation_losses)
+
+
+def test_validation_passes_do_not_touch_training_statistics(tiny_causal_lm) -> None:
+    """Проходы по валидации не входят ни в функцию потерь эпохи, ни в долю активаций в сетке."""
+    reports = []
+    for validation in (None, twenty_examples(seed=1)[:6]):
+        set_seed(0)
+        model = copy.deepcopy(tiny_causal_lm)
+        inject_adapters(model, "kan_lora", AdapterConfig(rank=4))
+        reports.append(
+            train(
+                model=model,
+                dataset=twenty_examples(),
+                collator=Collator(pad_token_id=0),
+                optimizer_config=OptimizerConfig(learning_rate=1e-3),
+                train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=1,
+                                         gradient_checkpointing=False),
+                device=DEVICE,
+                validation_dataset=validation,
+            )
+        )
+
+    without, with_validation = reports
+    assert without.validation_losses == []
+    assert with_validation.step_losses == pytest.approx(without.step_losses)
+    assert with_validation.fraction_inside_grid == pytest.approx(without.fraction_inside_grid)

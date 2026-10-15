@@ -84,6 +84,7 @@ def test_smoke_configuration_is_small_but_shaped_like_the_real_one() -> None:
     assert smoke.eval_limit == 50
     assert smoke.adapter == base.adapter
     assert smoke.max_length == base.max_length
+    assert smoke.validation_size == base.validation_size == 200
 
 
 def test_baseline_method_none_is_a_valid_method(config: ExperimentConfig) -> None:

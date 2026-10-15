@@ -50,7 +50,8 @@ def build_result_card(
     """Собирает карточку прогона.
 
     train_report=None — прогон без обучения (`method: none`): поля обучения
-    (пик видеопамяти и время обучения, покрытие оптимизатором, потери, доля
+    (пик видеопамяти и время обучения, покрытие оптимизатором, потери на обучении
+    и на валидации, доля
     активаций в сетке) пишутся null — «не обучалась», а не «ноль». Оптимизатора
     у такого прогона нет, поэтому и `optimizer` — null, хотя замороженная
     конфигурация в `config` по-прежнему содержит секцию optimizer из YAML.
@@ -74,6 +75,7 @@ def build_result_card(
         "optimizer_coverage": train_report.optimizer_coverage if trained else None,
         "step_losses": train_report.step_losses if trained else None,
         "epoch_losses": train_report.epoch_losses if trained else None,
+        "validation_losses": train_report.validation_losses if trained else None,
         "fraction_inside_grid": train_report.fraction_inside_grid if trained else None,
         "spline_stats": spline_stats,
     }
