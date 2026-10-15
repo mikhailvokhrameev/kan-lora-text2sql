@@ -36,7 +36,7 @@ from kanlora.data.loaders import (  # noqa: E402
 from kanlora.eval.exact_match import exact_match_by_hardness  # noqa: E402
 from kanlora.eval.execution import count_available_databases, execution_accuracy  # noqa: E402
 from kanlora.eval.generate import generate_sql  # noqa: E402
-from kanlora.results import build_result_card, write_result_card  # noqa: E402
+from kanlora.results import build_result_card, file_hashes, write_result_card  # noqa: E402
 from kanlora.train.loop import set_seed, train  # noqa: E402
 
 
@@ -196,6 +196,9 @@ def main() -> int:
         train_report=report,
         metrics=metrics,
         spline_stats=spline_stats,
+        data_files=file_hashes(root, [layout.train_file, layout.eval_file, layout.tables_file]),
+        # transformers записывает коммит репозитория модели при загрузке с Hub.
+        model_revision=getattr(model.config, "_commit_hash", None),
     )
     path = write_result_card(card, arguments.output)
 

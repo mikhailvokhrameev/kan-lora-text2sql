@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 from kanlora.config import apply_overrides, load_config
-from kanlora.results import build_result_card, collect_versions, git_commit, write_result_card
+from kanlora.results import (
+    build_result_card, collect_versions, file_hashes, git_commit, write_result_card,
+)
 from kanlora.train.loop import TrainReport
 
 BASE = Path(__file__).parents[1] / "configs" / "base.yaml"
@@ -120,3 +122,30 @@ def test_baseline_card_leaves_training_fields_null() -> None:
     ):
         assert card[field] is None, field
     assert card["adapted_modules"] == 0
+
+
+def test_file_hashes_are_sha256_keyed_by_file_name(tmp_path: Path) -> None:
+    """Версия данных (лекции 1 и 3 MLOps): правка файла меняет хэш в карточке."""
+    import hashlib
+
+    first = tmp_path / "train.json"
+    first.write_bytes(b"[]")
+    hashes = file_hashes(tmp_path, ["train.json", "absent.json"])
+
+    assert hashes == {"train.json": hashlib.sha256(b"[]").hexdigest(), "absent.json": None}
+    first.write_bytes(b"[1]")
+    assert file_hashes(tmp_path, ["train.json"])["train.json"] != hashes["train.json"]
+
+
+def test_card_records_data_and_model_versions() -> None:
+    card = build_result_card(
+        config=load_config(BASE),
+        injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
+        train_report=TrainReport(),
+        metrics={"exact_match": 0.1, "execution_accuracy": None},
+        spline_stats=None,
+        data_files={"train_spider.json": "abc"},
+        model_revision="0123abcd",
+    )
+    assert card["data_files"] == {"train_spider.json": "abc"}
+    assert card["model_revision"] == "0123abcd"

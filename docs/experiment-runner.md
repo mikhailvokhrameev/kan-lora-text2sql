@@ -202,6 +202,21 @@ YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
 переносят: `scripts/make_tables.py` показывает прочерк
 (`docs/make-tables.md`).
 
+Версии данных и модели (лекции 1 и 3 MLOps). `git_commit` фиксирует код, но
+`data/` не в git, а модель грузится с Hugging Face по имени. Поэтому карточка
+несёт ещё два поля:
+
+- `data_files` — SHA-256 трёх файлов набора (`train_file`, `eval_file`,
+  `tables_file` раскладки), посчитанный `file_hashes(root, names)` из
+  `kanlora/results.py`; отсутствующий файл даёт `null`. Изменённый или другой
+  файл Spider/PAUQ виден по расхождению хэша между карточками.
+- `model_revision` — коммит репозитория модели на Hugging Face, который
+  transformers записывает в `model.config._commit_hash` при загрузке
+  (например, `ea3f2471…` для текущего кэша Qwen2.5-Coder-0.5B-Instruct);
+  `null`, если его нет. Сравнимы только прогоны с одинаковой ревизией.
+
+Хэши файлов баз SQLite не считаются: их сотни, и на EM они не влияют.
+
 Карточка несёт из `train_report` оба ряда функции потерь: `step_losses` —
 значение на каждом шаге оптимизатора (после накопления градиента), и
 `epoch_losses` — среднее за эпоху. Третий ряд — `validation_losses`:
