@@ -34,24 +34,51 @@ def load_cards(directory: Path) -> list[dict]:
     ]
 
 
-def aggregate(cards: list[dict]) -> dict[tuple[str, str], dict]:
-    """Среднее и размах по зёрнам для каждой ячейки «метод, набор».
+CellKey = tuple[str, str, str, bool]
+
+# Значения конфигурации по умолчанию (configs/base.yaml): ими читаются старые карточки,
+# в которых этих полей ещё не было.
+DEFAULT_OPTIMIZER = "adamw"
+DEFAULT_LEARN_INPUT_SCALE = True
+
+
+def cell_key(card: dict) -> CellKey:
+    """Ключ агрегации: всё, что отличает конфигурацию, кроме зерна.
+
+    Прогоны с Muon и абляция без обучаемого масштаба входа — другие эксперименты,
+    их нельзя усреднять с основным. learn_input_scale различает только KAN-LoRA
+    (как и run_id): у LoRA/DoRA поле не используется и ключ не расщепляет.
+    """
+    config = card.get("config") or {}
+    optimizer = (
+        card.get("optimizer") or (config.get("optimizer") or {}).get("name") or DEFAULT_OPTIMIZER
+    )
+    learn_input_scale = (config.get("adapter") or {}).get(
+        "learn_input_scale", DEFAULT_LEARN_INPUT_SCALE
+    )
+    if card["method"] != "kan_lora":
+        learn_input_scale = DEFAULT_LEARN_INPUT_SCALE
+    return (card["method"], card["dataset"], optimizer, bool(learn_input_scale))
+
+
+def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
+    """Среднее и размах по зёрнам для каждой ячейки «метод, набор, оптимизатор, масштаб входа».
 
     Размах, а не стандартное отклонение: при трёх зёрнах отклонение оценивается
     плохо, а размах говорит ровно то, что нужно, — насколько далеко разъезжаются
     прогоны одного метода.
     """
-    buckets: dict[tuple[str, str], dict[str, list[float | None]]] = defaultdict(
+    buckets: dict[CellKey, dict[str, list[float | None]]] = defaultdict(
         lambda: defaultdict(list)
     )
     for card in cards:
-        key = (card["method"], card["dataset"])
+        key = cell_key(card)
         for metric in METRICS:
             buckets[key][metric].append(card["metrics"].get(metric))
         buckets[key]["peak_memory_bytes"].append(card["peak_memory_bytes"])
         buckets[key]["trainable_parameters"].append(card["trainable_parameters"])
 
-    aggregated: dict[tuple[str, str], dict] = {}
+    aggregated: dict[CellKey, dict] = {}
     for key, metrics in buckets.items():
         summary: dict[str, tuple[float, float] | None] = {}
         for name, values in metrics.items():
@@ -74,15 +101,16 @@ def _cell(value: tuple[float, float] | None, digits: int = 4) -> str:
 def main_table(cards: list[dict]) -> str:
     aggregated = aggregate(cards)
     lines = [
-        "| Метод | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров |",
-        "|---|---|---|---|---|---|",
-        "| без адаптера (базовый уровень) | — | заполнить прогоном базовой модели | | | 0 |",
+        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров |",
+        "|---|---|---|---|---|---|---|",
+        "| без адаптера (базовый уровень) | — | — | заполнить прогоном базовой модели | | | 0 |",
     ]
-    for (method, dataset), summary in sorted(aggregated.items()):
+    for (method, dataset, optimizer, learn_input_scale), summary in sorted(aggregated.items()):
+        label = method if learn_input_scale else f"{method} (без масштаба входа)"
         memory = summary["peak_memory_bytes"]
         parameters = summary["trainable_parameters"]
         lines.append(
-            f"| {method} | {dataset} "
+            f"| {label} | {optimizer} | {dataset} "
             f"| {_cell(summary['exact_match'])} | {_cell(summary['execution_accuracy'])} "
             f"| {memory[0] / 2**30:.2f} | {int(parameters[0])} |"
         )

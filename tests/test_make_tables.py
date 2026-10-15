@@ -24,10 +24,22 @@ def module():
     return loaded
 
 
-def card(method: str, dataset: str, seed: int, exact: float, execution: float | None = 0.5) -> dict:
+def card(
+    method: str,
+    dataset: str,
+    seed: int,
+    exact: float,
+    execution: float | None = 0.5,
+    optimizer: str = "adamw",
+    learn_input_scale: bool = True,
+) -> dict:
     return {
-        "run_id": f"{method}-{dataset}-adamw-seed{seed}",
-        "method": method, "dataset": dataset, "seed": seed, "optimizer": "adamw",
+        "run_id": f"{method}-{dataset}-{optimizer}-seed{seed}",
+        "method": method, "dataset": dataset, "seed": seed, "optimizer": optimizer,
+        "config": {
+            "adapter": {"learn_input_scale": learn_input_scale},
+            "optimizer": {"name": optimizer},
+        },
         "metrics": {"exact_match": exact, "execution_accuracy": execution},
         "peak_memory_bytes": 4 * 2**30, "train_seconds": 3600.0,
         "trainable_parameters": 100_000,
@@ -55,7 +67,7 @@ def test_loads_every_card(module, cards, tmp_path: Path) -> None:
 
 def test_aggregate_reports_mean_and_spread(module, cards) -> None:
     aggregated = module.aggregate(cards)
-    mean, spread = aggregated[("lora", "spider")]["exact_match"]
+    mean, spread = aggregated[("lora", "spider", "adamw", True)]["exact_match"]
 
     assert mean == pytest.approx(0.42)
     assert spread == pytest.approx(0.04)  # размах: 0.44 - 0.40
@@ -63,13 +75,13 @@ def test_aggregate_reports_mean_and_spread(module, cards) -> None:
 
 def test_single_seed_has_zero_spread(module) -> None:
     aggregated = module.aggregate([card("dora", "pauq", 0, 0.3)])
-    assert aggregated[("dora", "pauq")]["exact_match"][1] == pytest.approx(0.0)
+    assert aggregated[("dora", "pauq", "adamw", True)]["exact_match"][1] == pytest.approx(0.0)
 
 
 def test_absent_execution_accuracy_does_not_become_zero(module) -> None:
     """PAUQ может остаться без баз; нельзя усреднять «не мерили» с нулём."""
     aggregated = module.aggregate([card("lora", "pauq", 0, 0.3, execution=None)])
-    assert aggregated[("lora", "pauq")]["execution_accuracy"] is None
+    assert aggregated[("lora", "pauq", "adamw", True)]["execution_accuracy"] is None
 
 
 def test_main_table_shows_spread_next_to_the_mean(module, cards) -> None:
@@ -87,6 +99,71 @@ def test_main_table_includes_the_baseline_row_placeholder(module, cards) -> None
 def test_optimizer_table_shows_muon_coverage(module, cards) -> None:
     table = module.optimizer_table(cards)
     assert "Muon" in table and "AdamW" in table
+
+
+def test_aggregate_does_not_mix_optimizers(module) -> None:
+    """Прогоны AdamW и Muon — разные конфигурации: их среднее не имеет смысла."""
+    aggregated = module.aggregate(
+        [
+            card("kan_lora", "spider", 0, 0.40),
+            card("kan_lora", "spider", 1, 0.42),
+            card("kan_lora", "spider", 0, 0.50, optimizer="muon"),
+        ]
+    )
+
+    assert aggregated[("kan_lora", "spider", "adamw", True)]["exact_match"][0] == pytest.approx(0.41)
+    assert aggregated[("kan_lora", "spider", "muon", True)]["exact_match"][0] == pytest.approx(0.50)
+
+
+def test_aggregate_does_not_mix_input_scale_ablation(module) -> None:
+    aggregated = module.aggregate(
+        [
+            card("kan_lora", "spider", 0, 0.45),
+            card("kan_lora", "spider", 0, 0.35, learn_input_scale=False),
+        ]
+    )
+
+    assert aggregated[("kan_lora", "spider", "adamw", True)]["exact_match"][0] == pytest.approx(0.45)
+    assert aggregated[("kan_lora", "spider", "adamw", False)]["exact_match"][0] == pytest.approx(0.35)
+
+
+def test_input_scale_flag_does_not_split_non_kan_methods(module) -> None:
+    """learn_input_scale относится только к KAN-LoRA; run_id у LoRA/DoRA его не различает."""
+    aggregated = module.aggregate(
+        [
+            card("lora", "spider", 0, 0.40),
+            card("lora", "spider", 1, 0.42, learn_input_scale=False),
+        ]
+    )
+
+    assert list(aggregated) == [("lora", "spider", "adamw", True)]
+
+
+def test_old_cards_without_optimizer_fields_count_as_defaults(module) -> None:
+    """Старые карточки без optimizer/config агрегируются как AdamW с обучаемым масштабом."""
+    old = card("kan_lora", "spider", 0, 0.40)
+    del old["optimizer"], old["config"]
+    config_only = card("kan_lora", "spider", 1, 0.44)
+    del config_only["optimizer"]
+
+    aggregated = module.aggregate([old, config_only, card("kan_lora", "spider", 2, 0.42)])
+
+    assert list(aggregated) == [("kan_lora", "spider", "adamw", True)]
+    assert aggregated[("kan_lora", "spider", "adamw", True)]["exact_match"][0] == pytest.approx(0.42)
+
+
+def test_main_table_labels_rows_by_optimizer_and_input_scale(module) -> None:
+    rows = module.main_table(
+        [
+            card("kan_lora", "spider", 0, 0.45),
+            card("kan_lora", "spider", 0, 0.50, optimizer="muon"),
+            card("kan_lora", "spider", 0, 0.35, learn_input_scale=False),
+        ]
+    ).splitlines()[3:]
+
+    assert len(rows) == 3
+    assert sum("muon" in row for row in rows) == 1
+    assert sum("без масштаба входа" in row for row in rows) == 1
 
 
 def test_plot_writes_a_file(module, cards, tmp_path: Path) -> None:
