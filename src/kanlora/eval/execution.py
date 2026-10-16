@@ -57,7 +57,7 @@ def execute_query(db_path: Path, query: str, timeout: float = 30.0) -> Execution
             lambda: 1 if time.monotonic() > deadline else 0, _PROGRESS_STEP
         )
         return ExecutionOutcome(connection.execute(query).fetchall(), False)
-    except Exception:
+    except Exception:  # noqa: BLE001 — любая ошибка исполнения предсказанного запроса — промах
         return ExecutionOutcome(None, True)
     finally:
         if connection is not None:

@@ -47,7 +47,10 @@ def test_executes_and_returns_rows(root: Path) -> None:
 def test_endless_query_is_interrupted_by_timeout(root: Path) -> None:
     # Бесконечный рекурсивный CTE: без настоящего дедлайна исполнения
     # fetchall() не вернулся бы никогда (connect(timeout=...) этого не покрывает).
-    endless = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT count(*) FROM c"
+    endless = (
+        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) "
+        "SELECT count(*) FROM c"
+    )
     database = root / "database" / DB / f"{DB}.sqlite"
 
     started = time.monotonic()

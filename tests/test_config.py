@@ -5,13 +5,18 @@
 восстановить прогон, не заглядывая в историю команд.
 """
 
+import dataclasses
 from pathlib import Path
 
 import pytest
 import yaml
 
 from kanlora.config import (
-    METHODS, ExperimentConfig, apply_overrides, config_to_dict, load_config,
+    METHODS,
+    ExperimentConfig,
+    apply_overrides,
+    config_to_dict,
+    load_config,
 )
 
 BASE = Path(__file__).parents[1] / "configs" / "base.yaml"
@@ -36,7 +41,7 @@ def test_fixed_hyperparameters_match_the_plan(config: ExperimentConfig) -> None:
 
 
 def test_configuration_is_immutable(config: ExperimentConfig) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         config.seed = 5
 
 

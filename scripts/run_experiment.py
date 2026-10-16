@@ -27,19 +27,23 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from kanlora.adapters.inject import inject_adapters  # noqa: E402
-from kanlora.analysis.spline_stats import model_nonlinearity  # noqa: E402
-from kanlora.config import METHODS, apply_overrides, load_config  # noqa: E402
-from kanlora.data.collate import Collator, build_dataset, build_prompts  # noqa: E402
-from kanlora.data.loaders import (  # noqa: E402
-    LAYOUTS, load_dataset_schemas, load_examples, subsample, validation_subsample,
+from kanlora.adapters.inject import inject_adapters
+from kanlora.analysis.spline_stats import model_nonlinearity
+from kanlora.config import METHODS, apply_overrides, load_config
+from kanlora.data.collate import Collator, build_dataset, build_prompts
+from kanlora.data.loaders import (
+    LAYOUTS,
+    load_dataset_schemas,
+    load_examples,
+    subsample,
+    validation_subsample,
 )
-from kanlora.eval.exact_match import exact_match_by_hardness  # noqa: E402
-from kanlora.eval.execution import count_available_databases, execution_accuracy  # noqa: E402
+from kanlora.eval.exact_match import exact_match_by_hardness
+from kanlora.eval.execution import count_available_databases, execution_accuracy
 from kanlora.eval.generate import count_truncated_prompts, generate_sql
 from kanlora.eval.latency import measure_latency
-from kanlora.results import build_result_card, file_hashes, write_result_card  # noqa: E402
-from kanlora.train.loop import set_seed, train  # noqa: E402
+from kanlora.results import build_result_card, file_hashes, write_result_card
+from kanlora.train.loop import set_seed, train
 
 
 def parse_arguments() -> argparse.Namespace:

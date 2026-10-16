@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import torch
 
-__all__ = ["make_knots", "bspline_basis", "greville_abscissae", "num_basis_functions"]
+__all__ = ["bspline_basis", "greville_abscissae", "make_knots", "num_basis_functions"]
 
 
 def num_basis_functions(grid_size: int, spline_order: int) -> int:

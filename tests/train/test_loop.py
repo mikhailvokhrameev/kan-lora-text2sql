@@ -11,14 +11,13 @@ import copy
 
 import pytest
 import torch
+from conftest import unfreeze_embeddings, unfreeze_norms
 
 from kanlora.adapters.base import AdapterConfig
 from kanlora.adapters.inject import adapter_modules, inject_adapters
 from kanlora.data.collate import IGNORE_INDEX, Collator
 from kanlora.train.loop import TrainConfig, set_seed, train
 from kanlora.train.optimizers import OptimizerConfig
-
-from conftest import unfreeze_embeddings, unfreeze_norms
 
 VOCAB_SIZE = 64
 DEVICE = torch.device("cpu")

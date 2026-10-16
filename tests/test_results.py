@@ -11,7 +11,10 @@ import pytest
 
 from kanlora.config import apply_overrides, load_config
 from kanlora.results import (
-    build_result_card, collect_versions, file_hashes, git_commit, write_result_card,
+    build_result_card,
+    collect_versions,
+    file_hashes,
+    write_result_card,
 )
 from kanlora.train.loop import TrainReport
 
