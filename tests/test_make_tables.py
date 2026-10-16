@@ -226,9 +226,12 @@ def test_main_table_labels_rows_by_optimizer_and_input_scale(module) -> None:
         ]
     ).splitlines()[3:]
 
-    assert len(rows) == 3
-    assert sum("muon" in row for row in rows) == 1
-    assert sum("без масштаба входа" in row for row in rows) == 1
+    pairs = sorted((row.split("|")[1].strip(), row.split("|")[2].strip()) for row in rows)
+    assert pairs == [
+        ("kan_lora", "adamw"),
+        ("kan_lora", "muon"),
+        ("kan_lora (без масштаба входа)", "adamw"),
+    ]
 
 
 def test_plot_writes_a_file(module, cards, tmp_path: Path) -> None:

@@ -74,7 +74,7 @@ class KANLoRALinear(AdapterLinear):
         if self._fraction_sum is None:
             self._fraction_sum = fraction
         else:
-            self._fraction_sum = self._fraction_sum.to(fraction.device) + fraction
+            self._fraction_sum = self._fraction_sum + fraction
         self._fraction_count += 1
 
     def reset_fraction_inside_grid(self) -> None:

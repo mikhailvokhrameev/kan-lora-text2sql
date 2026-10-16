@@ -16,6 +16,7 @@ from kanlora.adapters.inject import adapter_modules, inject_adapters
 from kanlora.adapters.kan_layer import KANLayer
 from kanlora.adapters.spline import greville_abscissae
 from kanlora.analysis.spline_stats import (
+    _GRID_MARGIN,
     layer_nonlinearity,
     model_nonlinearity,
     nonlinearity_index,
@@ -135,7 +136,7 @@ def test_measurement_domain_follows_input_scale() -> None:
         layer.spline_coefficients.add_(0.5 * torch.randn_like(layer.spline_coefficients))
 
     clipped = layer_nonlinearity(layer, lo=-5.0, hi=5.0)
-    inside = layer_nonlinearity(layer, lo=-0.99 * 2.0, hi=0.99 * 2.0)
+    inside = layer_nonlinearity(layer, lo=-_GRID_MARGIN * 2.0, hi=_GRID_MARGIN * 2.0)
 
     assert [item.nonlinearity for item in clipped] == pytest.approx(
         [item.nonlinearity for item in inside]
@@ -150,7 +151,7 @@ def test_measurement_domain_is_per_input_feature() -> None:
 
     wide = layer_nonlinearity(layer, lo=-10.0, hi=10.0)
     exact = [
-        layer_nonlinearity(layer, lo=-0.99 * s, hi=0.99 * s)[source].nonlinearity
+        layer_nonlinearity(layer, lo=-_GRID_MARGIN * s, hi=_GRID_MARGIN * s)[source].nonlinearity
         for source, s in enumerate((1.0, 4.0))
     ]
     assert [item.nonlinearity for item in wide] == pytest.approx(exact)
