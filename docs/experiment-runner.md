@@ -176,7 +176,10 @@ git-репозитория или без доступного `git` — возв
 ### `build_result_card`
 
 ```python
-def build_result_card(config, injection, train_report, metrics, spline_stats) -> dict
+def build_result_card(
+    config, injection, train_report, metrics, spline_stats,
+    data_files=None, model_revision=None, latency=None,
+) -> dict
 ```
 
 Собирает карточку из результатов уже выполненного прогона: `injection` —
@@ -186,7 +189,11 @@ def build_result_card(config, injection, train_report, metrics, spline_stats) ->
 каждую эпоху, пиковой видеопамятью, временем и покрытием оптимизаторов;
 `metrics` — словарь с Exact Match (в том числе по сложности запроса) и
 Execution Accuracy; `spline_stats` — сводка `model_nonlinearity`
-(`docs/nonlinearity.md`) или `None` для линейных методов.
+(`docs/nonlinearity.md`) или `None` для линейных методов; `latency` —
+словарь задержки генерации `{"seconds_per_token", "total_seconds",
+"tokens", "merged", "device"}` без слияния адаптера (`eval/latency.py`,
+`docs/latency.md`), `None` — не мерили. Старые карточки поля `latency` не
+имеют; читатели карточек трактуют это как `None`.
 
 Для `method: none` вызывается с `train_report=None` и
 `injection={"trainable_parameters": None, "total_parameters": <число
@@ -301,14 +308,22 @@ def write_result_card(card: dict, directory: Path) -> Path
    (`execute_query` уже трактует отсутствующий файл как промах), но
    печатается предупреждение с числом недостающих баз, чтобы частично
    измеренное значение не приняли за полностью чистое.
-10. `model_nonlinearity(model) or None` — сводка по сплайнам для KAN-LoRA
-    (`docs/nonlinearity.md`); пустой словарь `{}` для LoRA/DoRA превращается
-    в `None`, чтобы в карточке линейного метода не лежало бессмысленное
-    пустое поле, которое пришлось бы отдельно проверять при сборке таблиц.
+10. `nonlinearity_and_latency(config, model, tokenizer, prompts[0], device)`
+    возвращает пару: сводку по сплайнам `model_nonlinearity(model) or None`
+    для KAN-LoRA (`docs/nonlinearity.md`; пустой словарь `{}` для LoRA/DoRA
+    превращается в `None`, чтобы в карточке линейного метода не лежало
+    бессмысленное пустое поле) и задержку генерации `measure_latency`
+    (`docs/latency.md`) на первом промпте отложенной выборки, на
+    `config.max_new_tokens` токенах и без слияния адаптера. Порядок
+    фиксирован: сначала индекс, затем задержка, потому что генерация
+    замера расширяет `observed_range` адаптеров KAN-LoRA, а индекс
+    должен считаться по размаху, накопленному на оценке
+    (`test_latency_is_measured_after_nonlinearity`). Задержка мерится и у
+    `method: none`.
 11. `build_result_card` и `write_result_card` в каталог `--output`
     (по умолчанию `results/`), затем печать итоговых метрик, пиковой
     видеопамяти в ГиБ и времени обучения (для `method: none` — только
-    метрик) и пути к карточке.
+    метрик), задержки в мс/токен и пути к карточке.
 
 Запуск базовой точки:
 
@@ -390,10 +405,9 @@ Muon/AdamW по роли параметра (`matrix_parameters()`, `docs/optimi
 Замер фактического времени прогона и запуск полной матрицы экспериментов на
 GTX 1080 Ti (задача 19) ещё не сделаны. Таблицы и графики из карточек
 собирает `scripts/make_tables.py` — см. [`make-tables.md`](make-tables.md).
-Замер задержки генерации со слиянием адаптера и без (задача 17) реализован
-отдельно — см. [`latency.md`](latency.md) — и из `run_experiment.py` не
-вызывается; карточка результата это поле не несёт, так как оно не входит в
-матрицу метрик, зафиксированную в `results.py`.
+Замер задержки генерации (задача 17, [`latency.md`](latency.md))
+вызывается из `run_experiment.py` в каждом прогоне, и карточка несёт поле
+`latency`.
 Смоук-верификация (см. выше)
 проведена на CPU и на наборе Spider; по PAUQ отдельно не прогонялась, но
 использует тот же код и ту же раскладку `DatasetLayout` — специфичного для

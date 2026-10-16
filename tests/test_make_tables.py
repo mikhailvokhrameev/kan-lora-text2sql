@@ -133,7 +133,7 @@ def test_baseline_row_is_filled_from_cards(module, cards) -> None:
     cells = [cell.strip() for cell in rows[0].strip("|").split("|")]
     assert cells == [
         "без адаптера (базовый уровень)", "—", "spider",
-        "0.2100 ± 0.0100", "0.3000 ± 0.0000", "—", "—",
+        "0.2100 ± 0.0100", "0.3000 ± 0.0000", "—", "—", "—",
     ]
     # Базовая точка — первая строка данных, над строками методов.
     assert table.splitlines()[2] == rows[0]
@@ -268,3 +268,14 @@ def test_nonlinearity_table_does_not_read_old_card_format(module) -> None:
     """Карточки до индекса слоя (mean/max по рёбрам) с новыми несравнимы: не читаются."""
     _, mean, maximum, _ = _nonlinearity_row(module, {"a": {"mean": 0.3, "max": 1.0}})
     assert mean == maximum == "не измерялась"
+
+
+def test_main_table_shows_generation_latency(module) -> None:
+    measured = {**card("lora", "spider", 0, 0.4), "latency": {"seconds_per_token": 0.025}}
+    assert module.main_table([measured]).splitlines()[-1].rstrip().endswith("| 25.0 |")
+
+
+def test_main_table_marks_missing_latency(module, cards) -> None:
+    """Карточки без поля latency (старые) — прочерк, а не падение."""
+    rows = module.main_table(cards).splitlines()[3:]
+    assert rows and all(row.rstrip().endswith("| — |") for row in rows)

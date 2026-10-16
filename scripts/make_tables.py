@@ -85,6 +85,7 @@ def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
         for metric in METRICS:
             buckets[key][metric].append(card["metrics"].get(metric))
         buckets[key]["peak_memory_bytes"].append(card.get("peak_memory_bytes"))
+        buckets[key]["seconds_per_token"].append((card.get("latency") or {}).get("seconds_per_token"))
         buckets[key]["trainable_parameters"].append(card.get("trainable_parameters"))
 
     aggregated: dict[CellKey, dict] = {}
@@ -121,11 +122,11 @@ def main_table(cards: list[dict]) -> str:
     """
     aggregated = aggregate(cards)
     lines = [
-        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров |",
-        "|---|---|---|---|---|---|---|",
+        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров | Задержка, мс/токен |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     if not any(key[0] == BASELINE for key in aggregated):
-        lines.append(f"| {BASELINE_LABEL} | — | — | нет прогона | нет прогона | — | — |")
+        lines.append(f"| {BASELINE_LABEL} | — | — | нет прогона | нет прогона | — | — | — |")
     for key in sorted(aggregated, key=_row_order):
         method, dataset, optimizer, learn_input_scale = key
         summary = aggregated[key]
@@ -139,10 +140,12 @@ def main_table(cards: list[dict]) -> str:
         # обучаемых параметров нет (null в карточке), в таблице — прочерк.
         memory_cell = f"{memory[0] / 2**30:.2f}" if memory is not None else "—"
         parameters_cell = f"{int(parameters[0])}" if parameters is not None else "—"
+        latency = summary["seconds_per_token"]
+        latency_cell = f"{latency[0] * 1000:.1f}" if latency is not None else "—"
         lines.append(
             f"| {label} | {optimizer or '—'} | {dataset} "
             f"| {_cell(summary['exact_match'])} | {_cell(summary['execution_accuracy'])} "
-            f"| {memory_cell} | {parameters_cell} |"
+            f"| {memory_cell} | {parameters_cell} | {latency_cell} |"
         )
     return "\n".join(lines)
 

@@ -149,3 +149,21 @@ def test_card_records_data_and_model_versions() -> None:
     )
     assert card["data_files"] == {"train_spider.json": "abc"}
     assert card["model_revision"] == "0123abcd"
+
+
+def test_card_records_generation_latency() -> None:
+    latency = {"seconds_per_token": 0.02, "total_seconds": 2.56, "tokens": 128,
+               "merged": False, "device": "cuda"}
+    card = build_result_card(
+        config=load_config(BASE),
+        injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
+        train_report=TrainReport(),
+        metrics={"exact_match": 0.1, "execution_accuracy": None},
+        spline_stats=None,
+        latency=latency,
+    )
+    assert card["latency"] == latency
+
+
+def test_latency_is_null_when_not_measured(card: dict) -> None:
+    assert card["latency"] is None

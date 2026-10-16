@@ -64,6 +64,7 @@ def build_result_card(
     spline_stats: dict | None,
     data_files: dict[str, str | None] | None = None,
     model_revision: str | None = None,
+    latency: dict | None = None,
 ) -> dict:
     """Собирает карточку прогона.
 
@@ -73,6 +74,9 @@ def build_result_card(
     активаций в сетке) пишутся null — «не обучалась», а не «ноль». Оптимизатора
     у такого прогона нет, поэтому и `optimizer` — null, хотя замороженная
     конфигурация в `config` по-прежнему содержит секцию optimizer из YAML.
+
+    latency — задержка генерации без слияния адаптера (`eval/latency.py`);
+    null — не мерили.
     """
     trained = train_report is not None
     return {
@@ -101,6 +105,7 @@ def build_result_card(
         "grad_norms": train_report.grad_norms if trained else None,
         "fraction_inside_grid": train_report.fraction_inside_grid if trained else None,
         "spline_stats": spline_stats,
+        "latency": latency,
     }
 
 
