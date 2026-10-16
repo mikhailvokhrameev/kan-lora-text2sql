@@ -46,7 +46,7 @@
   "fraction_inside_grid": [
     0.8450507120859055
   ],
-  "git_commit": "4e29adc52ce659a1d9476609e0e17a00d2ad2e55",
+  "git_commit": "2ab3526fb6b1268fe1aed9878bffa226d292c3e9",
   "grad_norms": [
     2.0645809173583984,
     1.4876188039779663,
@@ -74,8 +74,16 @@
     0.8511282801628113,
     1.049705982208252
   ],
+  "latency": {
+    "device": "cpu",
+    "merged": false,
+    "seconds_per_token": 0.06106589865627635,
+    "tokens": 128,
+    "total_seconds": 7.816435028003373
+  },
   "method": "kan_lora",
   "metrics": {
+    "eval_truncated_prompts": 0,
     "evaluated": 50,
     "exact_match": 0.52,
     "exact_match_by_hardness": {
@@ -100,843 +108,675 @@
   "spline_stats": {
     "model.layers.0.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.8671328534544277,
-      "mean": 0.0564127945727842
+      "index": 3.3644603490998373e-07
     },
     "model.layers.0.mlp.gate_proj": {
       "fraction_inside_grid": 0.9959622192382812,
-      "max": 0.9994594351961393,
-      "mean": 0.25883122916791995
+      "index": 5.453582268206479e-06
     },
     "model.layers.0.mlp.up_proj": {
       "fraction_inside_grid": 0.9975248718261719,
-      "max": 0.9982109126538032,
-      "mean": 0.3325255515938745
+      "index": 6.091805118851449e-06
     },
     "model.layers.0.self_attn.k_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.5419608294236374,
-      "mean": 0.015111502992581047
+      "index": 1.0380392798195733e-06
     },
     "model.layers.0.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.0030772555558554134,
-      "mean": 0.0001445092240812464
+      "index": 3.923467875670855e-10
     },
     "model.layers.0.self_attn.q_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9726428984039217,
-      "mean": 0.03372353091452168
+      "index": 8.596351907169203e-08
     },
     "model.layers.0.self_attn.v_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9028160608780451,
-      "mean": 0.033257916947848666
+      "index": 6.492948167749578e-08
     },
     "model.layers.1.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9997641873752172,
-      "mean": 0.24925577482768008
+      "index": 7.648884923074462e-07
     },
     "model.layers.1.mlp.gate_proj": {
       "fraction_inside_grid": 0.986524429321289,
-      "max": 0.9994847266857998,
-      "mean": 0.255840519199587
+      "index": 7.357938947456176e-06
     },
     "model.layers.1.mlp.up_proj": {
       "fraction_inside_grid": 0.9892758178710938,
-      "max": 0.8355511126229684,
-      "mean": 0.18777098420705454
+      "index": 6.428584800288098e-06
     },
     "model.layers.1.self_attn.k_proj": {
       "fraction_inside_grid": 0.9994705963134766,
-      "max": 0.9999995783354162,
-      "mean": 0.3039374121821078
+      "index": 7.34078264933064e-06
     },
     "model.layers.1.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9974939065287027,
-      "mean": 0.15300876683352768
+      "index": 1.127804060199084e-06
     },
     "model.layers.1.self_attn.q_proj": {
       "fraction_inside_grid": 0.9975618743896484,
-      "max": 0.9892418866133411,
-      "mean": 0.21673542149372932
+      "index": 4.366935123134495e-06
     },
     "model.layers.1.self_attn.v_proj": {
       "fraction_inside_grid": 0.9962725067138671,
-      "max": 0.9935499067265744,
-      "mean": 0.24257673536692334
+      "index": 1.6856897910370028e-06
     },
     "model.layers.10.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9870607121321026,
-      "mean": 0.12040203237149211
+      "index": 1.0013397215559224e-06
     },
     "model.layers.10.mlp.gate_proj": {
       "fraction_inside_grid": 0.9415841674804688,
-      "max": 0.9999660497626174,
-      "mean": 0.32745777059884384
+      "index": 1.999825795469636e-06
     },
     "model.layers.10.mlp.up_proj": {
       "fraction_inside_grid": 0.9389276123046875,
-      "max": 0.9958438698255198,
-      "mean": 0.18440556854939183
+      "index": 1.1217363041793903e-06
     },
     "model.layers.10.self_attn.k_proj": {
       "fraction_inside_grid": 0.7911707305908203,
-      "max": 0.9952964293312504,
-      "mean": 0.3883726781462601
+      "index": 5.347015889588787e-06
     },
     "model.layers.10.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9998992995986894,
-      "mean": 0.2508015524417129
+      "index": 1.5910166119517543e-06
     },
     "model.layers.10.self_attn.q_proj": {
       "fraction_inside_grid": 0.8554672241210938,
-      "max": 0.9989327658133181,
-      "mean": 0.20772621230147556
+      "index": 3.0470546540186937e-06
     },
     "model.layers.10.self_attn.v_proj": {
       "fraction_inside_grid": 0.7638304138183594,
-      "max": 0.9983090040239719,
-      "mean": 0.35428499176552164
+      "index": 1.4374501563211725e-06
     },
     "model.layers.11.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.6103737921346967,
-      "mean": 0.05293359420959924
+      "index": 1.590961604025441e-07
     },
     "model.layers.11.mlp.gate_proj": {
       "fraction_inside_grid": 0.8911848449707032,
-      "max": 0.9896282106153885,
-      "mean": 0.33866942910739695
+      "index": 2.34217085701848e-06
     },
     "model.layers.11.mlp.up_proj": {
       "fraction_inside_grid": 0.8833118438720703,
-      "max": 0.9973898719615673,
-      "mean": 0.23837567283102798
+      "index": 7.607359639837541e-07
     },
     "model.layers.11.self_attn.k_proj": {
       "fraction_inside_grid": 0.6257931900024414,
-      "max": 0.9999937181680603,
-      "mean": 0.4117698987468885
+      "index": 6.6758676042074025e-06
     },
     "model.layers.11.self_attn.o_proj": {
       "fraction_inside_grid": 0.9996488952636718,
-      "max": 0.999084975663835,
-      "mean": 0.2644031259546915
+      "index": 1.279943934111715e-06
     },
     "model.layers.11.self_attn.q_proj": {
       "fraction_inside_grid": 0.6231964492797851,
-      "max": 0.999775038349713,
-      "mean": 0.34599532524937016
+      "index": 3.162358226408389e-06
     },
     "model.layers.11.self_attn.v_proj": {
       "fraction_inside_grid": 0.5964635467529297,
-      "max": 0.9985242597135494,
-      "mean": 0.47261645581879824
+      "index": 2.6492347449138408e-06
     },
     "model.layers.12.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9090899824829681,
-      "mean": 0.05982675234205107
+      "index": 3.3021299702673565e-07
     },
     "model.layers.12.mlp.gate_proj": {
       "fraction_inside_grid": 0.9632305145263672,
-      "max": 0.9997574667200002,
-      "mean": 0.3355374487428176
+      "index": 3.0098494985728104e-06
     },
     "model.layers.12.mlp.up_proj": {
       "fraction_inside_grid": 0.9018247222900391,
-      "max": 0.9946849482370369,
-      "mean": 0.29295184260749363
+      "index": 1.8798005372505118e-06
     },
     "model.layers.12.self_attn.k_proj": {
       "fraction_inside_grid": 0.8446101379394532,
-      "max": 0.996909211527972,
-      "mean": 0.35695602761639517
+      "index": 7.617013243420561e-06
     },
     "model.layers.12.self_attn.o_proj": {
       "fraction_inside_grid": 0.9999894714355468,
-      "max": 0.9999928898575293,
-      "mean": 0.25513569479464787
+      "index": 1.6925188869829337e-06
     },
     "model.layers.12.self_attn.q_proj": {
       "fraction_inside_grid": 0.7456387329101563,
-      "max": 0.991505741550531,
-      "mean": 0.25430427967310437
+      "index": 4.257082065328083e-06
     },
     "model.layers.12.self_attn.v_proj": {
       "fraction_inside_grid": 0.8278936004638672,
-      "max": 0.999603915354983,
-      "mean": 0.2035384045911336
+      "index": 9.466582815338531e-07
     },
     "model.layers.13.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9889068176244505,
-      "mean": 0.14207072392726278
+      "index": 7.90532527509907e-07
     },
     "model.layers.13.mlp.gate_proj": {
       "fraction_inside_grid": 0.8967155456542969,
-      "max": 0.9999509371465175,
-      "mean": 0.26371458896290345
+      "index": 2.533498019547889e-06
     },
     "model.layers.13.mlp.up_proj": {
       "fraction_inside_grid": 0.9164229583740234,
-      "max": 0.999568205306759,
-      "mean": 0.44835221317817325
+      "index": 3.1885285763569168e-06
     },
     "model.layers.13.self_attn.k_proj": {
       "fraction_inside_grid": 0.6854352569580078,
-      "max": 0.9998477209056857,
-      "mean": 0.35762953455189417
+      "index": 5.7437337354243125e-06
     },
     "model.layers.13.self_attn.o_proj": {
       "fraction_inside_grid": 0.9988575744628906,
-      "max": 0.9948361691190221,
-      "mean": 0.38146768125255
+      "index": 1.6588062916694954e-06
     },
     "model.layers.13.self_attn.q_proj": {
       "fraction_inside_grid": 0.6955401611328125,
-      "max": 0.9945218979711827,
-      "mean": 0.291127417894307
+      "index": 4.29588354174305e-06
     },
     "model.layers.13.self_attn.v_proj": {
       "fraction_inside_grid": 0.708360595703125,
-      "max": 0.9928439452634026,
-      "mean": 0.3443408163053319
+      "index": 3.0534697715984904e-06
     },
     "model.layers.14.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.885851992867368,
-      "mean": 0.1379136515578576
+      "index": 9.048153886531865e-07
     },
     "model.layers.14.mlp.gate_proj": {
       "fraction_inside_grid": 0.9302479553222657,
-      "max": 0.994106834589863,
-      "mean": 0.3173165111207155
+      "index": 3.51360974809178e-06
     },
     "model.layers.14.mlp.up_proj": {
       "fraction_inside_grid": 0.9370336151123047,
-      "max": 0.9887526923103875,
-      "mean": 0.393290679719937
+      "index": 3.2031695232955905e-06
     },
     "model.layers.14.self_attn.k_proj": {
       "fraction_inside_grid": 0.7067387390136719,
-      "max": 0.999985865721364,
-      "mean": 0.5041362687496921
+      "index": 7.637259448800375e-06
     },
     "model.layers.14.self_attn.o_proj": {
       "fraction_inside_grid": 0.9998603820800781,
-      "max": 0.9998929845357268,
-      "mean": 0.2894743090005621
+      "index": 2.4438587966598307e-06
     },
     "model.layers.14.self_attn.q_proj": {
       "fraction_inside_grid": 0.7674336242675781,
-      "max": 0.9998338251242253,
-      "mean": 0.4099913514389753
+      "index": 3.537533389501774e-06
     },
     "model.layers.14.self_attn.v_proj": {
       "fraction_inside_grid": 0.6915245819091796,
-      "max": 0.9854568203149251,
-      "mean": 0.35846959548744667
+      "index": 3.919164799451502e-06
     },
     "model.layers.15.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9999880544380737,
-      "mean": 0.273693484434124
+      "index": 1.365050843220357e-06
     },
     "model.layers.15.mlp.gate_proj": {
       "fraction_inside_grid": 0.8494152069091797,
-      "max": 0.9979223632953537,
-      "mean": 0.3336986173593462
+      "index": 2.744574920534363e-06
     },
     "model.layers.15.mlp.up_proj": {
       "fraction_inside_grid": 0.9133262634277344,
-      "max": 0.9914516060797974,
-      "mean": 0.4066405596241435
+      "index": 2.318858210518704e-06
     },
     "model.layers.15.self_attn.k_proj": {
       "fraction_inside_grid": 0.7270051574707032,
-      "max": 0.9820943193247821,
-      "mean": 0.3845200635096262
+      "index": 7.420753695010789e-06
     },
     "model.layers.15.self_attn.o_proj": {
       "fraction_inside_grid": 0.9969692993164062,
-      "max": 0.9987212167961915,
-      "mean": 0.221083892003464
+      "index": 1.946379304003718e-06
     },
     "model.layers.15.self_attn.q_proj": {
       "fraction_inside_grid": 0.7597431945800781,
-      "max": 0.997978883824454,
-      "mean": 0.4048779352786114
+      "index": 5.919827900684179e-06
     },
     "model.layers.15.self_attn.v_proj": {
       "fraction_inside_grid": 0.741444091796875,
-      "max": 0.9999999999032461,
-      "mean": 0.34877344950872846
+      "index": 1.9992259988490895e-06
     },
     "model.layers.16.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9999904910691979,
-      "mean": 0.21712554802530204
+      "index": 2.1185633019439103e-06
     },
     "model.layers.16.mlp.gate_proj": {
       "fraction_inside_grid": 0.844546127319336,
-      "max": 0.9989277898988536,
-      "mean": 0.29384938824161977
+      "index": 4.494453753268616e-06
     },
     "model.layers.16.mlp.up_proj": {
       "fraction_inside_grid": 0.8113690185546875,
-      "max": 0.9911626274945385,
-      "mean": 0.37781293370477886
+      "index": 3.863880059301776e-06
     },
     "model.layers.16.self_attn.k_proj": {
       "fraction_inside_grid": 0.6283744049072265,
-      "max": 0.9990902922068651,
-      "mean": 0.48128063807605675
+      "index": 6.344564824978705e-06
     },
     "model.layers.16.self_attn.o_proj": {
       "fraction_inside_grid": 0.9997055053710937,
-      "max": 0.9998893665325821,
-      "mean": 0.30670319119147954
+      "index": 1.7940146757139644e-06
     },
     "model.layers.16.self_attn.q_proj": {
       "fraction_inside_grid": 0.5911133575439453,
-      "max": 0.9999044737597458,
-      "mean": 0.38775792110454
+      "index": 4.955742111879376e-06
     },
     "model.layers.16.self_attn.v_proj": {
       "fraction_inside_grid": 0.6691302490234375,
-      "max": 0.9986227650498077,
-      "mean": 0.2626143159881933
+      "index": 1.0647194484928027e-06
     },
     "model.layers.17.mlp.down_proj": {
       "fraction_inside_grid": 0.9998709869384765,
-      "max": 0.9927180601916096,
-      "mean": 0.2618645604796643
+      "index": 2.822715482066997e-06
     },
     "model.layers.17.mlp.gate_proj": {
       "fraction_inside_grid": 0.7860054779052734,
-      "max": 0.9974014485297356,
-      "mean": 0.30500298762417816
+      "index": 3.913270013884927e-06
     },
     "model.layers.17.mlp.up_proj": {
       "fraction_inside_grid": 0.6534557342529297,
-      "max": 0.9999865580088485,
-      "mean": 0.3166517579135049
+      "index": 3.983995292698088e-06
     },
     "model.layers.17.self_attn.k_proj": {
       "fraction_inside_grid": 0.6558180236816407,
-      "max": 0.9964579377130448,
-      "mean": 0.3409493579187989
+      "index": 8.063606602562024e-06
     },
     "model.layers.17.self_attn.o_proj": {
       "fraction_inside_grid": 0.9996041870117187,
-      "max": 0.9975526331873965,
-      "mean": 0.3114540843968032
+      "index": 2.0810828536507926e-06
     },
     "model.layers.17.self_attn.q_proj": {
       "fraction_inside_grid": 0.6313870620727539,
-      "max": 0.9565390413162829,
-      "mean": 0.35209489111907516
+      "index": 5.225655420478078e-06
     },
     "model.layers.17.self_attn.v_proj": {
       "fraction_inside_grid": 0.6758086395263672,
-      "max": 0.9950056466634396,
-      "mean": 0.26075898262921315
+      "index": 4.6214046798155584e-07
     },
     "model.layers.18.mlp.down_proj": {
       "fraction_inside_grid": 0.9994566345214844,
-      "max": 0.9999753594912518,
-      "mean": 0.32455622391778777
+      "index": 2.5305996506818045e-06
     },
     "model.layers.18.mlp.gate_proj": {
       "fraction_inside_grid": 0.8109552001953125,
-      "max": 0.9998560367911145,
-      "mean": 0.3886024036037669
+      "index": 4.919152160678411e-06
     },
     "model.layers.18.mlp.up_proj": {
       "fraction_inside_grid": 0.8064574432373047,
-      "max": 0.9898993263383694,
-      "mean": 0.327103413806022
+      "index": 4.043219041034837e-06
     },
     "model.layers.18.self_attn.k_proj": {
       "fraction_inside_grid": 0.6360079956054687,
-      "max": 0.9998041226146245,
-      "mean": 0.34690975459271567
+      "index": 3.4660903144365167e-06
     },
     "model.layers.18.self_attn.o_proj": {
       "fraction_inside_grid": 0.9995591735839844,
-      "max": 0.9999952718506181,
-      "mean": 0.251474257316694
+      "index": 4.144671770926805e-06
     },
     "model.layers.18.self_attn.q_proj": {
       "fraction_inside_grid": 0.7352555084228516,
-      "max": 0.9619646820231625,
-      "mean": 0.3136615998518639
+      "index": 3.3489325312555704e-06
     },
     "model.layers.18.self_attn.v_proj": {
       "fraction_inside_grid": 0.7088800811767578,
-      "max": 0.9999995341342356,
-      "mean": 0.3743304952809888
+      "index": 1.4210133286038346e-06
     },
     "model.layers.19.mlp.down_proj": {
       "fraction_inside_grid": 0.9952074432373047,
-      "max": 0.999795216142861,
-      "mean": 0.34989515328380966
+      "index": 3.6276466108981735e-06
     },
     "model.layers.19.mlp.gate_proj": {
       "fraction_inside_grid": 0.7407265472412109,
-      "max": 0.998230428605924,
-      "mean": 0.3513639858752303
+      "index": 3.829244574793962e-06
     },
     "model.layers.19.mlp.up_proj": {
       "fraction_inside_grid": 0.5748304748535156,
-      "max": 0.9924217850241598,
-      "mean": 0.3495658965198798
+      "index": 4.677886805570778e-06
     },
     "model.layers.19.self_attn.k_proj": {
       "fraction_inside_grid": 0.505068130493164,
-      "max": 0.998788709396207,
-      "mean": 0.5064852208792073
+      "index": 8.158658655486347e-06
     },
     "model.layers.19.self_attn.o_proj": {
       "fraction_inside_grid": 0.9992240142822265,
-      "max": 0.999041392491998,
-      "mean": 0.28006471679941125
+      "index": 3.876617800966718e-06
     },
     "model.layers.19.self_attn.q_proj": {
       "fraction_inside_grid": 0.5162064361572266,
-      "max": 0.9999894460544334,
-      "mean": 0.3873684712440328
+      "index": 2.9918048076887298e-06
     },
     "model.layers.19.self_attn.v_proj": {
       "fraction_inside_grid": 0.5400642013549805,
-      "max": 0.9988051719502214,
-      "mean": 0.3628160424258939
+      "index": 3.544128852077447e-06
     },
     "model.layers.2.mlp.down_proj": {
       "fraction_inside_grid": 0.9937401580810546,
-      "max": 0.9586453763609373,
-      "mean": 0.19572269190944344
+      "index": 2.75852665629795e-06
     },
     "model.layers.2.mlp.gate_proj": {
       "fraction_inside_grid": 0.9625847625732422,
-      "max": 0.9999380986531898,
-      "mean": 0.3631678225434541
+      "index": 6.2015772591427156e-06
     },
     "model.layers.2.mlp.up_proj": {
       "fraction_inside_grid": 0.9733480072021484,
-      "max": 0.9997373096912842,
-      "mean": 0.2658745833135363
+      "index": 7.138597532178194e-06
     },
     "model.layers.2.self_attn.k_proj": {
       "fraction_inside_grid": 0.916739501953125,
-      "max": 0.9972437360070455,
-      "mean": 0.43902465357759574
+      "index": 1.0003287311618428e-05
     },
     "model.layers.2.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9972830706602182,
-      "mean": 0.25717723509779916
+      "index": 1.2617632830798727e-06
     },
     "model.layers.2.self_attn.q_proj": {
       "fraction_inside_grid": 0.9498589324951172,
-      "max": 0.9999957547669713,
-      "mean": 0.3892526870465551
+      "index": 6.666159903107137e-06
     },
     "model.layers.2.self_attn.v_proj": {
       "fraction_inside_grid": 0.925193862915039,
-      "max": 0.9992517134426716,
-      "mean": 0.252978598934648
+      "index": 3.943039704335697e-06
     },
     "model.layers.20.mlp.down_proj": {
       "fraction_inside_grid": 0.9900821685791016,
-      "max": 0.9998664927570914,
-      "mean": 0.3190519281975715
+      "index": 5.582082447997882e-06
     },
     "model.layers.20.mlp.gate_proj": {
       "fraction_inside_grid": 0.6864033508300781,
-      "max": 0.9839235272447491,
-      "mean": 0.32410866526138055
+      "index": 4.270764007336077e-06
     },
     "model.layers.20.mlp.up_proj": {
       "fraction_inside_grid": 0.6376012802124024,
-      "max": 0.9998099660531267,
-      "mean": 0.39227667710818886
+      "index": 4.037771225952888e-06
     },
     "model.layers.20.self_attn.k_proj": {
       "fraction_inside_grid": 0.6670597076416016,
-      "max": 0.9964329442253067,
-      "mean": 0.48326873969598083
+      "index": 6.611397151699133e-06
     },
     "model.layers.20.self_attn.o_proj": {
       "fraction_inside_grid": 0.9762778472900391,
-      "max": 0.9988076277099218,
-      "mean": 0.252206829111631
+      "index": 4.856531410654899e-06
     },
     "model.layers.20.self_attn.q_proj": {
       "fraction_inside_grid": 0.6147164535522461,
-      "max": 0.998200142948488,
-      "mean": 0.3877293841163278
+      "index": 5.207618705707187e-06
     },
     "model.layers.20.self_attn.v_proj": {
       "fraction_inside_grid": 0.5808970260620118,
-      "max": 0.9998845334070723,
-      "mean": 0.38356357930089896
+      "index": 2.4620861501047454e-06
     },
     "model.layers.21.mlp.down_proj": {
       "fraction_inside_grid": 0.9759606170654297,
-      "max": 0.9999756597176674,
-      "mean": 0.20858222488490114
+      "index": 5.679955544524445e-06
     },
     "model.layers.21.mlp.gate_proj": {
       "fraction_inside_grid": 0.6775653839111329,
-      "max": 0.9937195778012187,
-      "mean": 0.2178594774686093
+      "index": 5.2813342963761754e-06
     },
     "model.layers.21.mlp.up_proj": {
       "fraction_inside_grid": 0.66507568359375,
-      "max": 0.9768575082125419,
-      "mean": 0.247445928987305
+      "index": 6.8406586019931746e-06
     },
     "model.layers.21.self_attn.k_proj": {
       "fraction_inside_grid": 0.6596292114257812,
-      "max": 0.999999999913167,
-      "mean": 0.39253289919918266
+      "index": 5.7565205202641885e-06
     },
     "model.layers.21.self_attn.o_proj": {
       "fraction_inside_grid": 0.8664698028564453,
-      "max": 0.9999603057097683,
-      "mean": 0.3738212489270881
+      "index": 3.2504119656073145e-06
     },
     "model.layers.21.self_attn.q_proj": {
       "fraction_inside_grid": 0.7144523620605469,
-      "max": 0.9899524907547458,
-      "mean": 0.3194328717020184
+      "index": 4.99046325346815e-06
     },
     "model.layers.21.self_attn.v_proj": {
       "fraction_inside_grid": 0.7125536346435547,
-      "max": 0.9817887878484861,
-      "mean": 0.27632596408785315
+      "index": 1.832138208312865e-06
     },
     "model.layers.22.mlp.down_proj": {
       "fraction_inside_grid": 0.9388141632080078,
-      "max": 0.9995045671527099,
-      "mean": 0.2664710754733196
+      "index": 6.089588615206262e-06
     },
     "model.layers.22.mlp.gate_proj": {
       "fraction_inside_grid": 0.6803474426269531,
-      "max": 0.9999772342333955,
-      "mean": 0.30525833859472673
+      "index": 5.121798114928808e-06
     },
     "model.layers.22.mlp.up_proj": {
       "fraction_inside_grid": 0.6924724578857422,
-      "max": 0.9886368824205748,
-      "mean": 0.2664165897456935
+      "index": 4.888197418421761e-06
     },
     "model.layers.22.self_attn.k_proj": {
       "fraction_inside_grid": 0.6215716552734375,
-      "max": 0.9987421941963721,
-      "mean": 0.44143321169635463
+      "index": 5.641656777057379e-06
     },
     "model.layers.22.self_attn.o_proj": {
       "fraction_inside_grid": 0.9857955932617187,
-      "max": 0.9889067300201642,
-      "mean": 0.36465849057040406
+      "index": 6.187822084475064e-06
     },
     "model.layers.22.self_attn.q_proj": {
       "fraction_inside_grid": 0.6421916961669922,
-      "max": 0.9934914103073915,
-      "mean": 0.43891620197617476
+      "index": 5.9418538541628085e-06
     },
     "model.layers.22.self_attn.v_proj": {
       "fraction_inside_grid": 0.6191268539428711,
-      "max": 0.9691731518124393,
-      "mean": 0.1414161210961519
+      "index": 1.5740233713929365e-06
     },
     "model.layers.23.mlp.down_proj": {
       "fraction_inside_grid": 0.8202246856689454,
-      "max": 0.9311953383811635,
-      "mean": 0.2342896439555437
+      "index": 4.972268315315191e-06
     },
     "model.layers.23.mlp.gate_proj": {
       "fraction_inside_grid": 0.5756982421875,
-      "max": 0.9996871222382425,
-      "mean": 0.29011693728863647
+      "index": 5.842831925434764e-06
     },
     "model.layers.23.mlp.up_proj": {
       "fraction_inside_grid": 0.6110170364379883,
-      "max": 0.99543177184955,
-      "mean": 0.2643224806104528
+      "index": 4.11937625708294e-06
     },
     "model.layers.23.self_attn.k_proj": {
       "fraction_inside_grid": 0.5922207260131835,
-      "max": 0.9998659597500457,
-      "mean": 0.35328208133149935
+      "index": 6.268547879791281e-06
     },
     "model.layers.23.self_attn.o_proj": {
       "fraction_inside_grid": 0.8873736572265625,
-      "max": 0.9995040886362685,
-      "mean": 0.27483909848886723
+      "index": 4.6000563077319265e-06
     },
     "model.layers.23.self_attn.q_proj": {
       "fraction_inside_grid": 0.5723994064331055,
-      "max": 0.9999999136581186,
-      "mean": 0.421242029801242
+      "index": 5.417152931510251e-06
     },
     "model.layers.23.self_attn.v_proj": {
       "fraction_inside_grid": 0.5740213394165039,
-      "max": 0.9949884103635124,
-      "mean": 0.3915640142093299
+      "index": 3.4202718565880006e-06
     },
     "model.layers.3.mlp.down_proj": {
       "fraction_inside_grid": 0.9942646789550781,
-      "max": 0.9960488531059623,
-      "mean": 0.3113680515433024
+      "index": 2.5852455785588607e-06
     },
     "model.layers.3.mlp.gate_proj": {
       "fraction_inside_grid": 0.9567438507080078,
-      "max": 0.9868361701378822,
-      "mean": 0.18790309040779657
+      "index": 7.233042585885676e-06
     },
     "model.layers.3.mlp.up_proj": {
       "fraction_inside_grid": 0.9229024505615234,
-      "max": 0.9964679496759937,
-      "mean": 0.35405900393250556
+      "index": 1.6673342178905197e-06
     },
     "model.layers.3.self_attn.k_proj": {
       "fraction_inside_grid": 0.8328797912597656,
-      "max": 0.9999482751489216,
-      "mean": 0.4397907393593348
+      "index": 9.015227952732144e-06
     },
     "model.layers.3.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9796489312971467,
-      "mean": 0.13458368629314044
+      "index": 1.0488656810704735e-06
     },
     "model.layers.3.self_attn.q_proj": {
       "fraction_inside_grid": 0.8848453521728515,
-      "max": 0.999792487111096,
-      "mean": 0.4370914307128562
+      "index": 9.149551353131651e-06
     },
     "model.layers.3.self_attn.v_proj": {
       "fraction_inside_grid": 0.8326895141601562,
-      "max": 0.9494271280014072,
-      "mean": 0.17215913628715587
+      "index": 2.1817604911615376e-06
     },
     "model.layers.4.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.8356769553878092,
-      "mean": 0.09935628635049504
+      "index": 2.4768848026929865e-06
     },
     "model.layers.4.mlp.gate_proj": {
       "fraction_inside_grid": 0.9449073028564453,
-      "max": 0.9941303955463577,
-      "mean": 0.16227046208585835
+      "index": 5.029796731920848e-06
     },
     "model.layers.4.mlp.up_proj": {
       "fraction_inside_grid": 0.9235903930664062,
-      "max": 0.992305649954056,
-      "mean": 0.23796584982378943
+      "index": 4.513598161889195e-06
     },
     "model.layers.4.self_attn.k_proj": {
       "fraction_inside_grid": 0.7791356658935547,
-      "max": 0.9988312168817297,
-      "mean": 0.3410784458198895
+      "index": 7.748597442151037e-06
     },
     "model.layers.4.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.916551779469534,
-      "mean": 0.1703767388043703
+      "index": 1.4395925335739619e-06
     },
     "model.layers.4.self_attn.q_proj": {
       "fraction_inside_grid": 0.8177816772460937,
-      "max": 0.9995658128112653,
-      "mean": 0.33934683808226385
+      "index": 6.210685744342168e-06
     },
     "model.layers.4.self_attn.v_proj": {
       "fraction_inside_grid": 0.7711209869384765,
-      "max": 0.9548130462360279,
-      "mean": 0.23954863146909205
+      "index": 2.0018260132069597e-06
     },
     "model.layers.5.mlp.down_proj": {
       "fraction_inside_grid": 0.9914954376220703,
-      "max": 0.998446151122915,
-      "mean": 0.31877443742871253
+      "index": 3.483117370641791e-06
     },
     "model.layers.5.mlp.gate_proj": {
       "fraction_inside_grid": 0.7726640319824218,
-      "max": 0.999605220847781,
-      "mean": 0.23058835630560212
+      "index": 5.358281858987249e-06
     },
     "model.layers.5.mlp.up_proj": {
       "fraction_inside_grid": 0.8319849395751953,
-      "max": 0.9976252430850063,
-      "mean": 0.30572613129374726
+      "index": 4.328552733955265e-06
     },
     "model.layers.5.self_attn.k_proj": {
       "fraction_inside_grid": 0.7857860565185547,
-      "max": 0.9983886827334228,
-      "mean": 0.32681213576649853
+      "index": 9.821202002568884e-06
     },
     "model.layers.5.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9988678347247597,
-      "mean": 0.20432467797575027
+      "index": 1.3855082115975626e-06
     },
     "model.layers.5.self_attn.q_proj": {
       "fraction_inside_grid": 0.8386283111572266,
-      "max": 0.9904254697505718,
-      "mean": 0.35934055975657964
+      "index": 5.31799558771855e-06
     },
     "model.layers.5.self_attn.v_proj": {
       "fraction_inside_grid": 0.7944866943359375,
-      "max": 0.999978539730045,
-      "mean": 0.3323299824857538
+      "index": 2.375601028509891e-06
     },
     "model.layers.6.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9646644213219601,
-      "mean": 0.14560357961195905
+      "index": 7.539907211367424e-07
     },
     "model.layers.6.mlp.gate_proj": {
       "fraction_inside_grid": 0.9195590209960938,
-      "max": 0.9968256672730779,
-      "mean": 0.19801438606329322
+      "index": 5.494403274679784e-06
     },
     "model.layers.6.mlp.up_proj": {
       "fraction_inside_grid": 0.8307894897460938,
-      "max": 0.9823631193778182,
-      "mean": 0.35240084552231105
+      "index": 3.3099025534421763e-06
     },
     "model.layers.6.self_attn.k_proj": {
       "fraction_inside_grid": 0.84410400390625,
-      "max": 0.9999665931871754,
-      "mean": 0.36225315460461593
+      "index": 7.191422615590616e-06
     },
     "model.layers.6.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.999996945295113,
-      "mean": 0.21009776651357548
+      "index": 1.037956217649757e-06
     },
     "model.layers.6.self_attn.q_proj": {
       "fraction_inside_grid": 0.8294924926757813,
-      "max": 0.9999793172784257,
-      "mean": 0.3171865633772785
+      "index": 4.2430640039524285e-06
     },
     "model.layers.6.self_attn.v_proj": {
       "fraction_inside_grid": 0.871380844116211,
-      "max": 0.9843328597891386,
-      "mean": 0.20138908467933142
+      "index": 2.1722822855475716e-06
     },
     "model.layers.7.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.999999868243202,
-      "mean": 0.12832576548956126
+      "index": 2.5159773275682376e-07
     },
     "model.layers.7.mlp.gate_proj": {
       "fraction_inside_grid": 0.9408878326416016,
-      "max": 0.9999423540997096,
-      "mean": 0.34549677417618735
+      "index": 3.892997890240329e-06
     },
     "model.layers.7.mlp.up_proj": {
       "fraction_inside_grid": 0.9282514953613281,
-      "max": 0.9980479767335195,
-      "mean": 0.27125267028443106
+      "index": 2.4305244029553363e-06
     },
     "model.layers.7.self_attn.k_proj": {
       "fraction_inside_grid": 0.8084925079345703,
-      "max": 0.9961293897881676,
-      "mean": 0.41905625450547607
+      "index": 5.961316144348895e-06
     },
     "model.layers.7.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.904430629378434,
-      "mean": 0.2879566083870372
+      "index": 2.757218129445978e-06
     },
     "model.layers.7.self_attn.q_proj": {
       "fraction_inside_grid": 0.8411444091796875,
-      "max": 0.986603081373224,
-      "mean": 0.35462323282931696
+      "index": 3.581129465202208e-06
     },
     "model.layers.7.self_attn.v_proj": {
       "fraction_inside_grid": 0.6842351531982422,
-      "max": 0.9980706365799104,
-      "mean": 0.3612469993704467
+      "index": 1.96446598332363e-06
     },
     "model.layers.8.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9282077130899888,
-      "mean": 0.11593853930753661
+      "index": 1.0968530798029673e-06
     },
     "model.layers.8.mlp.gate_proj": {
       "fraction_inside_grid": 0.9669490814208984,
-      "max": 0.9989013857116678,
-      "mean": 0.3551908185216052
+      "index": 2.2677965466967054e-06
     },
     "model.layers.8.mlp.up_proj": {
       "fraction_inside_grid": 0.9481163787841796,
-      "max": 0.9992501135559164,
-      "mean": 0.30931342004467793
+      "index": 1.5470698252973085e-06
     },
     "model.layers.8.self_attn.k_proj": {
       "fraction_inside_grid": 0.8796456909179687,
-      "max": 0.9888384404535284,
-      "mean": 0.4107107653125493
+      "index": 5.321318401805851e-06
     },
     "model.layers.8.self_attn.o_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9997264813389157,
-      "mean": 0.24485847530680535
+      "index": 1.7334162070173545e-06
     },
     "model.layers.8.self_attn.q_proj": {
       "fraction_inside_grid": 0.8927457427978516,
-      "max": 0.9995346206155051,
-      "mean": 0.2683016782879073
+      "index": 3.650047380341471e-06
     },
     "model.layers.8.self_attn.v_proj": {
       "fraction_inside_grid": 0.8310301971435546,
-      "max": 0.9878901975912623,
-      "mean": 0.32295994931730826
+      "index": 2.3585158646733432e-06
     },
     "model.layers.9.mlp.down_proj": {
       "fraction_inside_grid": 1.0,
-      "max": 0.9347715861908432,
-      "mean": 0.07199809561652404
+      "index": 2.3171130280826437e-07
     },
     "model.layers.9.mlp.gate_proj": {
       "fraction_inside_grid": 0.9281908416748047,
-      "max": 0.9999646348186673,
-      "mean": 0.3314628683778848
+      "index": 2.3756880949256048e-06
     },
     "model.layers.9.mlp.up_proj": {
       "fraction_inside_grid": 0.9501116180419922,
-      "max": 0.999537328539116,
-      "mean": 0.34692733069990284
+      "index": 1.6598934323216399e-06
     },
     "model.layers.9.self_attn.k_proj": {
       "fraction_inside_grid": 0.6323910140991211,
-      "max": 0.9994609164195856,
-      "mean": 0.41092963927304677
+      "index": 6.457529163125331e-06
     },
     "model.layers.9.self_attn.o_proj": {
       "fraction_inside_grid": 0.9999948120117188,
-      "max": 0.9997698530073823,
-      "mean": 0.2308649964260362
+      "index": 1.844524602891236e-06
     },
     "model.layers.9.self_attn.q_proj": {
       "fraction_inside_grid": 0.6182305145263672,
-      "max": 0.9996137471705541,
-      "mean": 0.36119569746383295
+      "index": 3.1574146757481664e-06
     },
     "model.layers.9.self_attn.v_proj": {
       "fraction_inside_grid": 0.5948639678955078,
-      "max": 0.9999945142208694,
-      "mean": 0.299996699988006
+      "index": 1.6406400666416028e-06
     }
   },
   "step_losses": [
@@ -1142,7 +982,7 @@
     0.2127038985490799
   ],
   "total_parameters": 498540736,
-  "train_seconds": 298.1425169589929,
+  "train_seconds": 277.3037572919857,
   "trainable_parameters": 4507968,
   "validation_losses": [
     0.5221920905262232,

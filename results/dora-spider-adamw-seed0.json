@@ -44,7 +44,7 @@
     0.30914251550100746
   ],
   "fraction_inside_grid": [],
-  "git_commit": "4e29adc52ce659a1d9476609e0e17a00d2ad2e55",
+  "git_commit": "2ab3526fb6b1268fe1aed9878bffa226d292c3e9",
   "grad_norms": [
     2.5047178268432617,
     1.8068938255310059,
@@ -72,8 +72,16 @@
     1.0441572666168213,
     1.3408231735229492
   ],
+  "latency": {
+    "device": "cpu",
+    "merged": false,
+    "seconds_per_token": 0.5159798683803274,
+    "tokens": 128,
+    "total_seconds": 66.0454231526819
+  },
   "method": "dora",
   "metrics": {
+    "eval_truncated_prompts": 0,
     "evaluated": 50,
     "exact_match": 0.5,
     "exact_match_by_hardness": {
@@ -299,7 +307,7 @@
     0.20126278698444366
   ],
   "total_parameters": 498736000,
-  "train_seconds": 713.9354791670339,
+  "train_seconds": 529.1747274579247,
   "trainable_parameters": 4703232,
   "validation_losses": [
     0.5221923492103815,

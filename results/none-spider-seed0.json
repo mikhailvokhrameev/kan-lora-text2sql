@@ -42,10 +42,18 @@
   "dataset": "spider",
   "epoch_losses": null,
   "fraction_inside_grid": null,
-  "git_commit": "4e29adc52ce659a1d9476609e0e17a00d2ad2e55",
+  "git_commit": "2ab3526fb6b1268fe1aed9878bffa226d292c3e9",
   "grad_norms": null,
+  "latency": {
+    "device": "cpu",
+    "merged": false,
+    "seconds_per_token": 0.053784718315152226,
+    "tokens": 128,
+    "total_seconds": 6.884443944339485
+  },
   "method": "none",
   "metrics": {
+    "eval_truncated_prompts": 0,
     "evaluated": 50,
     "exact_match": 0.24,
     "exact_match_by_hardness": {
