@@ -157,6 +157,11 @@ alpha 16.0, сетка 5, порядок сплайна 3, скорость об
 отличалась ещё и устройством (например, другим набором целевых проекций),
 проверенным оказался бы не тот путь кода, который идёт в боевой прогон.
 
+`eval_limit` берёт первые N примеров (`eval_examples[:eval_limit]`), а dev
+Spider упорядочен по базам: первые 50 примеров — это две базы. Смоук-числа
+поэтому нерепрезентативны. На полный прогон (`eval_limit: null`) это не
+влияет.
+
 ## Карточка результата (`results.py`)
 
 ### `collect_versions` и `git_commit`
@@ -193,7 +198,10 @@ Execution Accuracy; `spline_stats` — сводка `model_nonlinearity`
 словарь задержки генерации `{"seconds_per_token", "total_seconds",
 "tokens", "merged", "device"}` без слияния адаптера (`eval/latency.py`,
 `docs/latency.md`), `None` — не мерили. Старые карточки поля `latency` не
-имеют; читатели карточек трактуют это как `None`.
+имеют; читатели карточек трактуют это как `None`. В `metrics` лежит и
+`eval_truncated_prompts` — число промптов отложенной выборки, усечённых на
+оценке (`docs/generate.md`); карточки, записанные до появления поля, его не
+имеют, и читатели трактуют это как «не измерялось».
 
 Для `method: none` вызывается с `train_report=None` и
 `injection={"trainable_parameters": None, "total_parameters": <число
@@ -404,6 +412,12 @@ Muon/AdamW по роли параметра (`matrix_parameters()`, `docs/optimi
   `test_git_commit_is_recorded`).
 - Отсутствующая Execution Accuracy сериализуется как `null`, а не как `0.0`
   (`test_absent_execution_accuracy_is_null_not_zero`).
+- Задержка генерации попадает в карточку как есть
+  (`test_card_records_generation_latency`), а если её не мерили — `null`
+  (`test_latency_is_null_when_not_measured`).
+- Задержка мерится после индекса нелинейности, чтобы генерация замера не
+  расширила `observed_range` адаптеров KAN-LoRA
+  (`test_latency_is_measured_after_nonlinearity`).
 - Записанный файл — валидный JSON, названный по `run_id`, и не экранирует
   кириллицу (`test_written_card_is_valid_json_named_by_run`,
   `test_card_is_written_in_readable_utf8`).

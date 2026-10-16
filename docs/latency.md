@@ -106,6 +106,9 @@ def measure_latency(
   см. `docs/generate.md`) возвращает ровно запрошенное число токенов,
   положительное суммарное время и `seconds_per_token ==
   total_seconds / tokens` (`test_latency_report_is_filled`).
+- Промпт замера кодируется без специальных токенов, как на обучении и
+  оценке: в модель уходит ровно посимвольная кодировка строки без BOS
+  (`test_latency_prompt_is_tokenized_without_special_tokens`).
 
 ## Замер в каждом прогоне
 

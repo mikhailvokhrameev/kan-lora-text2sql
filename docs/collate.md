@@ -246,6 +246,10 @@ class Collator:
 
 ## Проверенные инварианты
 
+Модульные тесты используют `FakeTokenizer` — посимвольный токенизатор с
+методом `apply_chat_template`, воспроизводящим разметку ChatML; сети они не
+требуют.
+
 - Реплики — `system` с `SYSTEM_PROMPT` и `user` со схемой и вопросом
   (`test_messages_are_system_instruction_then_schema_and_question`).
 - Промпт — результат `apply_chat_template(..., add_generation_prompt=True)`,
@@ -271,10 +275,6 @@ class Collator:
   (`test_labels_align_with_input_ids`).
 - Последовательность заканчивается на `eos_token_id` и в `input_ids`, и в
   `labels` (`test_sequence_ends_with_eos`).
-
-Модульные тесты используют `FakeTokenizer` — посимвольный токенизатор с
-методом `apply_chat_template`, воспроизводящим разметку ChatML; сети они не
-требуют.
 - При переполнении усекается промпт, а цель (вместе с EOS) остаётся
   в конце последовательности целиком
   (`test_truncation_cuts_the_prompt_and_keeps_the_target`).

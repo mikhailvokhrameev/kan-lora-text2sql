@@ -51,7 +51,10 @@ def aggregate(cards: list[dict]) -> dict[tuple[str, str, str | None, bool | None
 (`test_baseline_cell_key_has_no_optimizer_and_no_input_scale`).
 
 Значения читаются из карточки: оптимизатор — из `optimizer`, затем из
-`config.optimizer.name`; `learn_input_scale` — из `config.adapter`. Старые
+`config.optimizer.name`. Верхнее поле карточки `optimizer` — источник
+истины, `config.optimizer.name` — запасной вариант для карточек без этого
+поля; `run_experiment` пишет оба из одной конфигурации, так что расходиться
+они не могут. `learn_input_scale` — из `config.adapter`. Старые
 карточки без этих полей читаются как значения конфигурации по умолчанию
 (`adamw`, `learn_input_scale = true`, `configs/base.yaml`), поэтому ранее
 собранные результаты агрегируются по-прежнему
@@ -89,8 +92,8 @@ def main_table(cards: list[dict]) -> str
 Строит таблицу Markdown: одна строка на ключ агрегации
 `(метод, набор, оптимизатор, learn_input_scale)`. Строки базового уровня
 (`method: none`) идут первыми, остальные — лексикографически по ключу, как
-и раньше (`_row_order`). Столбцы: метод, оптимизатор, набор и далее метрики; последний столбец —
-«Задержка, мс/токен»: среднее по зёрнам `latency.seconds_per_token`,
+и раньше (`_row_order`). Столбцы: метод, оптимизатор, набор и далее
+метрики; последний столбец — «Задержка, мс/токен»: среднее по зёрнам `latency.seconds_per_token`,
 умноженное на 1000, или «—», если ни у одной карточки ключа поля нет
 (старые карточки). Числа сравнимы только между прогонами на одном
 устройстве (`latency.device`, `docs/latency.md`).
@@ -118,7 +121,7 @@ def main_table(cards: list[dict]) -> str
 в таблице (`test_main_table_includes_the_baseline_row_placeholder`).
 
 Каждая ячейка метрики выводится функцией `_cell` в виде `среднее ± размах/2`
-(например, `0.4200 ± 0.0200`) или строкой «не измерялась», если для этой
+(например, `0.4200 ± 0.0200`) или строкой «не измерялась», если для этого
 ключа агрегации ни одно зерно не дало значения.
 
 ## `nonlinearity_table` и `optimizer_table`
@@ -255,6 +258,11 @@ def main() -> int
   (`test_optimizer_table_shows_muon_coverage`).
 - `plot_fraction_inside_grid` создаёт непустой файл графика
   (`test_plot_writes_a_file`).
+- Главная таблица показывает задержку генерации в мс/токен: среднее по
+  зёрнам `latency.seconds_per_token`, умноженное на 1000
+  (`test_main_table_shows_generation_latency`); у карточек без поля
+  `latency` (старые) в столбце прочерк, а не падение
+  (`test_main_table_marks_missing_latency`).
 
 ## Не реализовано
 

@@ -361,8 +361,8 @@ LoRA: при `B = 0` направление `V` в точности равно `
 ### Методы
 
 - `effective_weight() -> Tensor` — вычисляет `W_eff` по формуле выше (с
-  отсоединённой нормой, см. выше); вызывается на каждом прямом проходе, а не кэшируется, так как
-  `lora_a`, `lora_b` и `magnitude` обучаемы.
+  отсоединённой нормой, см. выше); вызывается на каждом прямом проходе,
+  а не кэшируется, так как `lora_a`, `lora_b` и `magnitude` обучаемы.
 - `forward(x) -> Tensor` — `linear(x, effective_weight(), base.bias)`.
 - `analytic_parameter_count() -> int` —
   `rank * (in_features + out_features) + out_features` (LoRA плюс вектор
