@@ -37,7 +37,7 @@ class AdapterConfig:
 правка поля в середине серии прогонов невозможна на уровне типов.
 
 `grid_size`, `spline_order` и `learn_input_scale` используются только
-KAN-LoRA-адаптером (пока не реализован); для LoRA и DoRA они игнорируются
+KAN-LoRA-адаптером; для LoRA и DoRA они игнорируются
 и хранятся в конфиге ради того, чтобы карточка результата содержала
 одинаковый набор полей для всех прогонов независимо от метода.
 
@@ -72,9 +72,8 @@ self.scaling = config.alpha / config.rank
 - `matrix_parameters() -> tuple[nn.Parameter, ...]` — параметры, реально
   задающие линейное отображение матричным умножением (`y = W @ x`), а не
   любые двумерные тензоры. По умолчанию пуст. Метод объявляет этот список на
-  уровне интерфейса; `train/optimizers.py` пока не читает его — там
-  разводка параметров на Muon/AdamW всё ещё идёт по размерности тензора
-  (`split_by_dimension`, см. `docs/optimizers.md`).
+  уровне интерфейса; по нему `train/optimizers.py` разводит параметры
+  между Muon и AdamW (`split_by_matrix_role`, см. `docs/optimizers.md`).
 - `trainable_parameter_count() -> int` — сумма `numel()` по параметрам с
   `requires_grad=True`. Так как `self.base` заморожен в конструкторе,
   веса основы в счётчик не попадают.
@@ -489,10 +488,9 @@ delta_W * x = (alpha / r) * B * phi(A x)
   матричным умножением, а `spline_scale`/`base_weight`, несмотря на
   двумерную форму `(rank, rank)`, участвуют поэлементно
   (`spline_scale * spline`, `base_weight` под `silu`). Это тот критерий,
-  которым `train/optimizers.py` в перспективе должен будет разводить
-  параметры между Muon и AdamW вместо текущей разводки по голой
-  размерности тензора (`split_by_dimension`, см. `docs/optimizers.md`) —
-  на момент этой правки `optimizers.py` ещё не читает `matrix_parameters()`.
+  которым `train/optimizers.py` разводит параметры между Muon и AdamW
+  (`split_by_matrix_role`, см. `docs/optimizers.md`), а не по голой
+  размерности тензора.
 
 ## Проверенные инварианты
 
@@ -641,13 +639,10 @@ def adapter_modules(model: nn.Module) -> list[tuple[str, AdapterLinear]]
   внедряют часть адаптеров молча (`test_unknown_method_is_rejected`,
   `test_missing_target_module_is_rejected`).
 
-## Не реализовано
+## За пределами модуля
 
 - Чтение схемы БД и наборов данных Spider/PAUQ (`kanlora/data/`) описано
-  отдельно в `docs/data.md`.
-- Промпт, токенизация и маска функции потерь (`data/collate.py`, задача 9
-  плана) — соединяют внедрённую модель с данными; ещё не написаны.
-
-Эти пункты не описываются подробнее здесь, чтобы не документировать
-несуществующее поведение; их интерфейсы зафиксированы в
-`docs/superpowers/plans/2026-09-09-kan-lora-text2sql.md`.
+  отдельно в [`data.md`](data.md).
+- Промпт, токенизация и маска функции потерь (`data/collate.py`), которые
+  соединяют внедрённую модель с данными, описаны в
+  [`collate.md`](collate.md).
