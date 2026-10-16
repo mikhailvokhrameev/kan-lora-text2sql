@@ -250,17 +250,21 @@ def _nonlinearity_row(module, stats: dict) -> list[str]:
 def test_nonlinearity_table_skips_unmeasured_adapters(module, nan_first: bool) -> None:
     """NaN адаптера целиком вне сетки не должен ни заражать среднее, ни теряться в max."""
     nan = float("nan")
-    stats = {"a": {"mean": nan, "max": nan}, "b": {"mean": 0.2, "max": 0.5}}
+    stats = {"a": {"index": nan}, "b": {"index": 0.2}, "c": {"index": 0.6}}
     if not nan_first:
         stats = dict(reversed(list(stats.items())))
 
     _, mean, maximum, _ = _nonlinearity_row(module, stats)
-    assert mean == "0.2000" and maximum == "0.5000"
+    assert mean == "0.4000" and maximum == "0.6000"
 
 
 def test_nonlinearity_table_marks_run_with_nothing_measured(module) -> None:
     nan = float("nan")
-    _, mean, maximum, _ = _nonlinearity_row(
-        module, {"a": {"mean": nan, "max": nan}, "b": {"mean": nan, "max": nan}}
-    )
+    _, mean, maximum, _ = _nonlinearity_row(module, {"a": {"index": nan}, "b": {"index": nan}})
+    assert mean == maximum == "не измерялась"
+
+
+def test_nonlinearity_table_does_not_read_old_card_format(module) -> None:
+    """Карточки до индекса слоя (mean/max по рёбрам) с новыми несравнимы: не читаются."""
+    _, mean, maximum, _ = _nonlinearity_row(module, {"a": {"mean": 0.3, "max": 1.0}})
     assert mean == maximum == "не измерялась"

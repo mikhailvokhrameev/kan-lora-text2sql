@@ -149,20 +149,24 @@ def main_table(cards: list[dict]) -> str:
 
 def nonlinearity_table(cards: list[dict]) -> str:
     lines = [
-        "| Прогон | Средний индекс нелинейности | Максимальный | Доля активаций в сетке |",
+        (
+            "| Прогон | Индекс нелинейности, среднее по адаптерам | Максимум по адаптерам "
+            "| Доля активаций в сетке |"
+        ),
         "|---|---|---|---|",
     ]
     for card in sorted(cards, key=lambda item: item["run_id"]):
         stats = card.get("spline_stats")
         if not stats:
             continue
-        # NaN у адаптера означает, что все его активации вне сетки и мерить нечего
-        # (docs/nonlinearity.md). Такие адаптеры пропускаются: иначе NaN заражал бы
-        # среднее, а max() с NaN зависит от порядка элементов.
-        means = [v["mean"] for v in stats.values() if not math.isnan(v["mean"])]
-        maxima = [v["max"] for v in stats.values() if not math.isnan(v["max"])]
-        mean_cell = f"{sum(means) / len(means):.4f}" if means else "не измерялась"
-        max_cell = f"{max(maxima):.4f}" if maxima else "не измерялась"
+        # NaN — все активации адаптера вне сетки, мерить нечего (docs/nonlinearity.md);
+        # без "index" — карточка старого формата (mean/max по рёбрам), с новыми
+        # несравнимая. Такие адаптеры пропускаются.
+        values = [
+            v["index"] for v in stats.values() if not math.isnan(v.get("index", math.nan))
+        ]
+        mean_cell = f"{sum(values) / len(values):.4f}" if values else "не измерялась"
+        max_cell = f"{max(values):.4f}" if values else "не измерялась"
         fractions = card.get("fraction_inside_grid") or [float("nan")]
         lines.append(f"| {card['run_id']} | {mean_cell} | {max_cell} | {fractions[-1]:.3f} |")
     return "\n".join(lines)

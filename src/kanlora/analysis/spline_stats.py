@@ -8,6 +8,10 @@
 
     index = RSS / TSS,   RSS — остаток после подгонки, TSS — полная дисперсия.
 
+Это индекс ребра. Индекс слоя берёт те же суммы по всем его рёбрам сразу:
+ΣRSS / ΣTSS — доля суммарной дисперсии рёбер, которую не объясняют прямые.
+Рёбра с ничтожной амплитудой в нём почти ничего не весят.
+
 Ноль означает, что функция — прямая, единица — что прямая не объясняет
 ничего. Если индекс близок к нулю по всем слоям, нелинейность не используется
 и KAN-LoRA сводится к LoRA с накладными расходами. Это доказанный
@@ -17,6 +21,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import torch
@@ -31,6 +36,7 @@ __all__ = [
     "measurement_interval",
     "model_nonlinearity",
     "nonlinearity_index",
+    "pooled_nonlinearity",
 ]
 
 
@@ -39,22 +45,48 @@ class EdgeStats:
     source: int
     target: int
     nonlinearity: float
+    # Суммы квадратов на сетке замера: остаток после подгонки прямой (RSS) и
+    # отклонение от среднего (TSS). Нужны индексу слоя (pooled_nonlinearity).
+    residual: float
+    total: float
 
 
-def nonlinearity_index(inputs: torch.Tensor, outputs: torch.Tensor) -> float:
-    """Доля дисперсии функции, не объяснённая наилучшей прямой."""
+def _line_fit_sums(inputs: torch.Tensor, outputs: torch.Tensor) -> tuple[float, float]:
+    """(RSS, TSS) наилучшей прямой; у постоянной функции RSS = 0."""
     x = inputs.to(torch.float64).flatten()
     y = outputs.to(torch.float64).flatten()
 
     total = ((y - y.mean()) ** 2).sum()
     if total.item() <= 1e-18:
         # Постоянная функция — частный случай прямой, а не деление на ноль.
-        return 0.0
+        return 0.0, float(total)
 
     design = torch.stack([x, torch.ones_like(x)], dim=1)
     coefficients = torch.linalg.lstsq(design, y.unsqueeze(1)).solution
     residual = ((y - (design @ coefficients).squeeze(1)) ** 2).sum()
-    return float((residual / total).clamp(min=0.0, max=1.0))
+    return float(residual.clamp(min=0.0, max=float(total))), float(total)
+
+
+def nonlinearity_index(inputs: torch.Tensor, outputs: torch.Tensor) -> float:
+    """Доля дисперсии функции, не объяснённая наилучшей прямой."""
+    residual, total = _line_fit_sums(inputs, outputs)
+    return 0.0 if total <= 1e-18 else residual / total
+
+
+def pooled_nonlinearity(stats: Sequence[EdgeStats]) -> float:
+    """Индекс слоя: доля суммарной дисперсии его рёбер, не объяснённая прямыми.
+
+    ΣRSS / ΣTSS — та же формула, что у ребра, но суммы берутся по всем рёбрам
+    сразу. Ребро вносит вклад пропорционально дисперсии своего выхода, поэтому
+    почти нулевые рёбра (недиагональные стартуют с нуля) не решают за слой, а
+    общий масштаб слоя на индекс не влияет. NaN — рёбер нет (все вне сетки).
+    """
+    if not stats:
+        return float("nan")
+    total = sum(item.total for item in stats)
+    if total <= 1e-18:
+        return 0.0
+    return sum(item.residual for item in stats) / total
 
 
 # Запас от правого края сетки: базис полуоткрыт, `x == hi` уже даёт ноль.
@@ -109,9 +141,9 @@ def layer_nonlinearity(
             probe[:, source] = grid.to(dtype)
             response = layer(probe)
             for target in range(layer.out_features):
-                stats.append(
-                    EdgeStats(source, target, nonlinearity_index(grid, response[:, target]))
-                )
+                residual, total = _line_fit_sums(grid, response[:, target])
+                index = 0.0 if total <= 1e-18 else residual / total
+                stats.append(EdgeStats(source, target, index, residual, total))
     return stats
 
 
@@ -125,7 +157,7 @@ def model_nonlinearity(
     (`observed_range`), а если проходов ещё не было — вся область определения
     сетки. В любом случае отрезок обрезается по сетке (`layer_nonlinearity`):
     за ней сплайн равен нулю и измерять там нечего. Если для адаптера пересечение
-    пусто, `mean` и `max` равны `NaN`; долю входов вне сетки показывает
+    пусто, `index` равен `NaN`; долю входов вне сетки показывает
     `fraction_inside_grid`.
     """
     summary: dict[str, dict[str, float]] = {}
@@ -141,11 +173,10 @@ def model_nonlinearity(
             if lo > hi:
                 lo, hi = float("-inf"), float("inf")
 
-        values = [item.nonlinearity for item in layer_nonlinearity(module.kan, lo, hi)]
+        stats = layer_nonlinearity(module.kan, lo, hi)
         fraction = module.mean_fraction_inside_grid()
         summary[name] = {
-            "mean": sum(values) / len(values) if values else float("nan"),
-            "max": max(values) if values else float("nan"),
+            "index": pooled_nonlinearity(stats),
             "fraction_inside_grid": float("nan") if fraction is None else fraction,
         }
     return summary
