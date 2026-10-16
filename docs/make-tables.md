@@ -60,6 +60,25 @@ def aggregate(cards: list[dict]) -> dict[tuple[str, str, str | None, bool | None
 собранные результаты агрегируются по-прежнему
 (`test_old_cards_without_optimizer_fields_count_as_defaults`).
 
+Карточки одной ячейки обязаны различаться только зерном. Имена файлов
+смок-прогона и полного прогона совпадают (`lora-spider-adamw-seed0.json`),
+а ключ ячейки не видит ни `train_subset`, ни `eval_limit`, ни остальных
+полей конфигурации: без проверки ячейка молча усреднила бы 50 примеров
+смока с полной отложенной выборкой, а задержку на CPU — с задержкой на
+GPU. Поэтому `aggregate` перед усреднением сравнивает `config` всех
+карточек ячейки (без `seed`) и `latency.device` и при расхождении бросает
+`ValueError` с `run_id` расходящихся карточек и именами полей (вложенные —
+через точку, например `train.epochs`). Те же исключения, что у ключа:
+`adapter.learn_input_scale` не сравнивается у LoRA/DoRA, а у базовой
+модели — секции `adapter` и `optimizer`. Карточка без `config` или без
+`latency` (старый формат) не имеет, что предъявить, и не конфликтует с
+остальными. Зёрна одной конфигурации по-прежнему усредняются
+(`test_aggregate_refuses_cards_with_different_configs_in_one_cell`,
+`test_aggregate_names_nested_config_fields`,
+`test_aggregate_accepts_cards_that_differ_only_in_seed`,
+`test_aggregate_refuses_cards_measured_on_different_devices`,
+`test_missing_latency_does_not_conflict_with_a_measured_device`).
+
 Размах (`max - min`), а не стандартное отклонение — при трёх зёрнах (0, 1, 2
 из глобальных ограничений плана) оценка отклонения статистически
 неустойчива, а размах прямо отвечает на вопрос «насколько далеко разъезжаются
@@ -263,6 +282,15 @@ def main() -> int
   (`test_main_table_shows_generation_latency`); у карточек без поля
   `latency` (старые) в столбце прочерк, а не падение
   (`test_main_table_marks_missing_latency`).
+- Карточки одной ячейки с разной конфигурацией или разным устройством
+  замера задержки не усредняются, а вызывают `ValueError` с именами полей
+  (`test_aggregate_refuses_cards_with_different_configs_in_one_cell`,
+  `test_aggregate_names_nested_config_fields`,
+  `test_aggregate_refuses_cards_measured_on_different_devices`); отличие
+  только в зерне проверку проходит
+  (`test_aggregate_accepts_cards_that_differ_only_in_seed`), а отсутствие
+  `latency` не считается расхождением
+  (`test_missing_latency_does_not_conflict_with_a_measured_device`).
 
 ## Не реализовано
 

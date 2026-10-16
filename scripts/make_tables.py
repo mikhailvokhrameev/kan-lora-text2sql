@@ -70,18 +70,96 @@ def cell_key(card: dict) -> CellKey:
     return (card["method"], card["dataset"], optimizer, bool(learn_input_scale))
 
 
+def _flatten(section: dict, prefix: str = "") -> dict[str, object]:
+    """Вложенная конфигурация в плоский словарь с путями вида `train.epochs`."""
+    flat: dict[str, object] = {}
+    for name, value in section.items():
+        path = f"{prefix}{name}"
+        if isinstance(value, dict):
+            flat.update(_flatten(value, f"{path}."))
+        else:
+            flat[path] = value
+    return flat
+
+
+def _comparable_config(card: dict) -> dict[str, object] | None:
+    """Конфигурация карточки без зерна и без полей, которые её ячейку не различают.
+
+    Те же исключения, что в `cell_key`: масштаб входа у LoRA/DoRA не
+    используется, у базовой модели нет ни оптимизатора, ни адаптера. Карточка
+    без конфигурации (старый формат) сравнению не подлежит — как и карточка
+    без задержки, она не опровергает остальные.
+    """
+    config = card.get("config")
+    if not config:
+        return None
+    flat = _flatten(config)
+    flat.pop("seed", None)
+    if card["method"] != "kan_lora":
+        flat.pop("adapter.learn_input_scale", None)
+    if card["method"] == BASELINE:
+        flat = {name: value for name, value in flat.items() if not name.startswith(("adapter.", "optimizer."))}
+    return flat
+
+
+def _check_comparable(key: CellKey, cards: list[dict]) -> None:
+    """Бросает ValueError, если карточки одной ячейки получены в разных условиях.
+
+    Имена файлов смок-прогона и полного прогона совпадают, и без этой проверки
+    ячейка молча усреднила бы 50 примеров смока с полной отложенной выборкой, а
+    задержку на CPU — с задержкой на GPU. Различаться могут только зёрна.
+    """
+    reference_card = None
+    reference_config = None
+    for card in cards:
+        config = _comparable_config(card)
+        if config is None:
+            continue
+        if reference_config is None:
+            reference_card, reference_config = card, config
+            continue
+        differing = sorted(
+            name
+            for name in reference_config.keys() | config.keys()
+            if reference_config.get(name) != config.get(name)
+        )
+        if differing:
+            raise ValueError(
+                f"ячейка {key}: карточки {reference_card['run_id']} и {card['run_id']} "
+                f"различаются полями конфигурации {', '.join(differing)}; "
+                "их нельзя усреднять, уберите лишние карточки из каталога результатов"
+            )
+
+    devices: dict[str, str] = {}
+    for card in cards:
+        device = (card.get("latency") or {}).get("device")
+        if device is not None:
+            devices.setdefault(device, card["run_id"])
+    if len(devices) > 1:
+        raise ValueError(
+            f"ячейка {key}: задержка измерена на разных устройствах "
+            f"(latency.device): {', '.join(f'{d} в {r}' for d, r in devices.items())}; "
+            "их нельзя усреднять, уберите лишние карточки из каталога результатов"
+        )
+
+
 def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
     """Среднее и размах по зёрнам для каждой ячейки «метод, набор, оптимизатор, масштаб входа».
 
     Размах, а не стандартное отклонение: при трёх зёрнах отклонение оценивается
     плохо, а размах говорит ровно то, что нужно, — насколько далеко разъезжаются
     прогоны одного метода.
+
+    Карточки одной ячейки обязаны различаться только зерном: конфигурация и
+    устройство замера задержки у них одни (`_check_comparable`), иначе ValueError.
     """
     buckets: dict[CellKey, dict[str, list[float | None]]] = defaultdict(
         lambda: defaultdict(list)
     )
+    members: dict[CellKey, list[dict]] = defaultdict(list)
     for card in cards:
         key = cell_key(card)
+        members[key].append(card)
         for metric in METRICS:
             buckets[key][metric].append(card["metrics"].get(metric))
         buckets[key]["peak_memory_bytes"].append(card.get("peak_memory_bytes"))
@@ -90,6 +168,7 @@ def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
 
     aggregated: dict[CellKey, dict] = {}
     for key, metrics in buckets.items():
+        _check_comparable(key, members[key])
         summary: dict[str, tuple[float, float] | None] = {}
         for name, values in metrics.items():
             present = [value for value in values if value is not None]

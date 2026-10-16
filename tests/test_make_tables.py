@@ -204,6 +204,64 @@ def test_input_scale_flag_does_not_split_non_kan_methods(module) -> None:
     assert list(aggregated) == [("lora", "spider", "adamw", True)]
 
 
+def with_config(item: dict, seed: int | None = None, device: str | None = None, **fields) -> dict:
+    """Копия карточки с изменённым верхним полем config, зерном и устройством задержки."""
+    result = {**item, "config": {**item["config"], **fields}}
+    if seed is not None:
+        result["seed"] = seed
+        result["config"]["seed"] = seed
+    if device is not None:
+        result["latency"] = {"device": device, "seconds_per_token": 0.05}
+    return result
+
+
+def test_aggregate_refuses_cards_with_different_configs_in_one_cell(module) -> None:
+    """Смок-карточка (eval_limit 50) и полная делят имя файла и ячейку: усреднять нельзя."""
+    smoke = with_config(card("lora", "spider", 0, 0.50), eval_limit=50)
+    full = with_config(card("lora", "spider", 1, 0.40), eval_limit=1034)
+
+    with pytest.raises(ValueError) as error:
+        module.aggregate([smoke, full])
+
+    message = str(error.value)
+    assert "eval_limit" in message
+    assert smoke["run_id"] in message and full["run_id"] in message
+
+
+def test_aggregate_names_nested_config_fields(module) -> None:
+    first = with_config(card("lora", "spider", 0, 0.5), train={"epochs": 1})
+    second = with_config(card("lora", "spider", 1, 0.4), train={"epochs": 2})
+
+    with pytest.raises(ValueError, match=r"train\.epochs"):
+        module.aggregate([first, second])
+
+
+def test_aggregate_accepts_cards_that_differ_only_in_seed(module) -> None:
+    first = with_config(card("lora", "spider", 0, 0.40), seed=0, eval_limit=50)
+    second = with_config(card("lora", "spider", 1, 0.44), seed=1, eval_limit=50)
+
+    aggregated = module.aggregate([first, second])
+
+    assert aggregated[("lora", "spider", "adamw", True)]["exact_match"][0] == pytest.approx(0.42)
+
+
+def test_aggregate_refuses_cards_measured_on_different_devices(module) -> None:
+    """Задержка на CPU и на GPU несравнима, средняя по ним ничего не значит."""
+    cpu = with_config(card("lora", "spider", 0, 0.40), seed=0, device="cpu")
+    gpu = with_config(card("lora", "spider", 1, 0.44), seed=1, device="cuda")
+
+    with pytest.raises(ValueError, match="device"):
+        module.aggregate([cpu, gpu])
+
+
+def test_missing_latency_does_not_conflict_with_a_measured_device(module) -> None:
+    """Старая карточка без latency не имеет устройства и не мешает измеренному."""
+    old = with_config(card("lora", "spider", 0, 0.40), seed=0)
+    measured = with_config(card("lora", "spider", 1, 0.44), seed=1, device="cuda")
+
+    assert module.aggregate([old, measured])
+
+
 def test_old_cards_without_optimizer_fields_count_as_defaults(module) -> None:
     """Старые карточки без optimizer/config агрегируются как AdamW с обучаемым масштабом."""
     old = card("kan_lora", "spider", 0, 0.40)
