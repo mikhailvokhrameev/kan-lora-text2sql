@@ -333,7 +333,8 @@ def write_result_card(card: dict, directory: Path) -> Path
     `config.max_new_tokens` токенах и без слияния адаптера. Порядок
     фиксирован: сначала индекс, затем задержка, потому что генерация
     замера расширяет `observed_range` адаптеров KAN-LoRA, а индекс
-    должен считаться по размаху, накопленному на оценке
+    должен считаться по размаху, накопленному за обучение, валидацию и
+    оценку
     (`test_latency_is_measured_after_nonlinearity`). Задержка мерится и у
     `method: none`.
 11. `build_result_card` и `write_result_card` в каталог `--output`
@@ -390,6 +391,13 @@ latency and eval truncation count`; прослеживаемость чисел 
 выполнен с `optimizer.name: adamw`, так что исправление разводки
 Muon/AdamW по роли параметра (`matrix_parameters()`, `docs/optimizers.md`)
 на эти числа не влияет.
+
+Длинные прогоны на Mac запускают под `caffeinate -i`, но он не мешает
+сну при закрытии крышки, если ноутбук работает от батареи: 2026-10-16
+смок-прогон DoRA простоял с 18:37 до 20:34 из-за «Clamshell Sleep».
+Держите крышку открытой или подключите питание. На время обучения пауза
+не влияет: `time.perf_counter` на macOS читает `mach_absolute_time`, а он
+сон не считает.
 
 ## Проверенные инварианты
 

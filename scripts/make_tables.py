@@ -201,7 +201,7 @@ def main_table(cards: list[dict]) -> str:
     """
     aggregated = aggregate(cards)
     lines = [
-        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров | Задержка, мс/токен |",
+        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров | Задержка без слияния, мс/токен |",
         "|---|---|---|---|---|---|---|---|",
     ]
     if not any(key[0] == BASELINE for key in aggregated):
