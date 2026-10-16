@@ -61,11 +61,15 @@ def measure_latency(
     """
     model.to(device)
     model.eval()
-    encoded = tokenizer([prompt], return_tensors="pt").to(device)
+    # Без специальных токенов — как collate.encode при обучении и generate_sql на оценке.
+    ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+    input_ids = torch.tensor([ids], dtype=torch.long, device=device)
+    attention_mask = torch.ones_like(input_ids)
 
     def generate() -> None:
         model.generate(
-            **encoded,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
             min_new_tokens=max_new_tokens,  # ровно столько токенов во всех замерах
             do_sample=False,

@@ -61,3 +61,38 @@ def test_latency_report_is_filled(tiny_causal_lm, tiny_tokenizer) -> None:
     assert report.total_seconds > 0
     assert report.seconds_per_token == pytest.approx(report.total_seconds / report.tokens)
     assert report.merged is False
+
+
+class _BosTokenizer:
+    """Добавляет BOS при add_special_tokens=True; на обучении и оценке его нет."""
+
+    pad_token_id = 0
+    bos_token_id = 2
+
+    def __call__(self, text: str, add_special_tokens: bool = True) -> dict[str, list[int]]:
+        ids = [ord(character) % 64 for character in text]
+        return {"input_ids": ([self.bos_token_id] if add_special_tokens else []) + ids}
+
+
+class _RecordingModel:
+    def __init__(self) -> None:
+        self.calls: list[torch.Tensor] = []
+
+    def to(self, device):
+        return self
+
+    def eval(self):
+        return self
+
+    def generate(self, input_ids, attention_mask, **kwargs):
+        self.calls.append(input_ids)
+        return input_ids
+
+
+def test_latency_prompt_is_tokenized_without_special_tokens() -> None:
+    """Промпт замера токенизируется так же, как на обучении и оценке (без BOS)."""
+    model = _RecordingModel()
+    measure_latency(
+        model, _BosTokenizer(), "SELECT", device=DEVICE, max_new_tokens=2, repeats=1, warmup=0
+    )
+    assert model.calls[0][0].tolist() == [ord(c) % 64 for c in "SELECT"]
