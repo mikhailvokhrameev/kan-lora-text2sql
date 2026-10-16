@@ -91,7 +91,7 @@ class KANLayer(nn.Module):
         self.base_weight.zero_()
         self.input_scale.fill_(1.0)
 
-    def _safe_input_scale_divisor(self) -> torch.Tensor:
+    def input_scale_divisor(self) -> torch.Tensor:
         """`input_scale` с полом на модуль, знак сохранён.
 
         Используется только как делитель: сам параметр `input_scale`
@@ -104,7 +104,7 @@ class KANLayer(nn.Module):
         return torch.copysign(magnitude, self.input_scale)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        scaled = x / self._safe_input_scale_divisor()
+        scaled = x / self.input_scale_divisor()
         basis = bspline_basis(scaled, self.knots, self.spline_order)
 
         spline = torch.einsum("...ib,oib->...oi", basis, self.spline_coefficients)
@@ -120,7 +120,7 @@ class KANLayer(nn.Module):
         участвует в вычислении.
         """
         lo, hi = self.grid_range
-        scaled = x / self._safe_input_scale_divisor()
+        scaled = x / self.input_scale_divisor()
         return ((scaled >= lo) & (scaled <= hi)).to(x.dtype).mean()
 
     def parameter_count(self) -> int:

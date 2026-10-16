@@ -106,7 +106,7 @@ def measurement_interval(
     если пересечение пусто или вырождено в точку: мерить нечего.
     """
     grid_lo, grid_hi = layer.grid_range
-    scale = float(layer._safe_input_scale_divisor()[source])
+    scale = float(layer.input_scale_divisor()[source])
     edges = sorted((_GRID_MARGIN * grid_lo * scale, _GRID_MARGIN * grid_hi * scale))
     start, stop = max(lo, edges[0]), min(hi, edges[1])
     return (start, stop) if start < stop else None

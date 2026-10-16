@@ -187,7 +187,7 @@ B-сплайновый базис определён на конечной се�
 ### `forward(x) -> Tensor`
 
 ```python
-scaled = x / self._safe_input_scale_divisor()
+scaled = x / self.input_scale_divisor()
 basis = bspline_basis(scaled, self.knots, self.spline_order)
 spline = einsum("...ib,oib->...oi", basis, self.spline_coefficients)
 base = silu(scaled).unsqueeze(-2) * self.base_weight
@@ -195,11 +195,11 @@ edges = base + self.spline_scale * spline
 return (edges * self.input_scale).sum(dim=-1)
 ```
 
-Обратите внимание: делителем служит `_safe_input_scale_divisor()`, а
+Обратите внимание: делителем служит `input_scale_divisor()`, а
 обратное умножение на выходе (`edges * self.input_scale`) использует сам
 параметр без изменений — см. ниже.
 
-### Пол на модуль `input_scale` (`_safe_input_scale_divisor`)
+### Пол на модуль `input_scale` (`input_scale_divisor`)
 
 `input_scale` — необученно ограниченный параметр: ничто не мешает
 градиентному спуску увести его модуль к нулю. Поскольку `input_scale`
@@ -214,7 +214,7 @@ return (edges * self.input_scale).sum(dim=-1)
 Защита — отдельный метод:
 
 ```python
-def _safe_input_scale_divisor(self) -> torch.Tensor:
+def input_scale_divisor(self) -> torch.Tensor:
     magnitude = self.input_scale.abs().clamp(min=_MIN_INPUT_SCALE_MAGNITUDE)
     return torch.copysign(magnitude, self.input_scale)
 ```
