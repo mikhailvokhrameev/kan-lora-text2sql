@@ -204,6 +204,10 @@ YAML), `trainable_parameters`, `train_seconds`, `peak_memory_bytes` (пик
 `optimizer_coverage`, `step_losses`, `epoch_losses`, `validation_losses`,
 `grad_norms`, `fraction_inside_grid`, `spline_stats`; `adapted_modules` равно 0,
 `metrics.truncated_prompts` — `null` (обучающая выборка не кодируется).
+`metrics.eval_truncated_prompts` — число промптов отложенной выборки, которые
+`generate_sql` усечёт при бюджете `max_length - max_new_tokens`
+(`count_truncated_prompts`, `docs/generate.md`); для базовой модели без
+адаптера оно есть и считается так же, как для адаптированных методов.
 `null` здесь значит «не применимо: не обучалась», а не ноль — по тому же
 принципу, что и для Execution Accuracy ниже. Читатели карточек это
 переносят: `scripts/make_tables.py` показывает прочерк
@@ -294,8 +298,12 @@ def write_result_card(card: dict, directory: Path) -> Path
    для базовой модели не читается (шаг 3 загружает только отложенную).
 8. `generate_sql` (`docs/generate.md`) генерирует ответы на отложенной
    выборке, усекая промпты до `config.max_length - config.max_new_tokens`
-   по тому же правилу, что и `build_dataset` при обучении; Exact Match считается официальной метрикой Spider
-   (`exact_match_by_hardness`, `docs/exact_match.md`) по `tables.json`.
+   по тому же правилу, что и `build_dataset` при обучении. Сразу до
+   генерации `count_truncated_prompts` считает, сколько промптов на оценке
+   будет усечено, — это `metrics.eval_truncated_prompts`; при ненулевом
+   числе печатается предупреждение. Exact Match считается официальной
+   метрикой Spider (`exact_match_by_hardness`, `docs/exact_match.md`) по
+   `tables.json`.
 9. Execution Accuracy считается, если хотя бы для одной из уникальных
    `db_id` отложенной выборки на диске нашёлся файл базы
    (`count_available_databases(root, layout, unique_db_ids)`,

@@ -36,7 +36,7 @@ from kanlora.data.loaders import (  # noqa: E402
 )
 from kanlora.eval.exact_match import exact_match_by_hardness  # noqa: E402
 from kanlora.eval.execution import count_available_databases, execution_accuracy  # noqa: E402
-from kanlora.eval.generate import generate_sql  # noqa: E402
+from kanlora.eval.generate import count_truncated_prompts, generate_sql
 from kanlora.eval.latency import measure_latency
 from kanlora.results import build_result_card, file_hashes, write_result_card  # noqa: E402
 from kanlora.train.loop import set_seed, train  # noqa: E402
@@ -171,6 +171,11 @@ def main() -> int:
     )
 
     prompts = build_prompts(eval_examples, schemas, tokenizer)
+    eval_truncated = count_truncated_prompts(
+        tokenizer, prompts, max_length=config.max_length, max_new_tokens=config.max_new_tokens
+    )
+    if eval_truncated:
+        print(f"внимание: на оценке усечено промптов: {eval_truncated} из {len(prompts)}")
     predicted = generate_sql(
         model, tokenizer, prompts,
         device=device, batch_size=config.eval_batch_size,
@@ -185,6 +190,7 @@ def main() -> int:
         "exact_match_by_hardness": hardness,
         "execution_accuracy": None,
         "truncated_prompts": truncated,
+        "eval_truncated_prompts": eval_truncated,
         "evaluated": len(gold),
     }
 

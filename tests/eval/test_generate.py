@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from kanlora.data.collate import build_prompt, encode, truncate_prompt
-from kanlora.eval.generate import generate_sql, normalize_sql
+from kanlora.eval.generate import count_truncated_prompts, generate_sql, normalize_sql
 
 
 def test_cuts_at_the_first_newline() -> None:
@@ -231,3 +231,22 @@ def test_budget_must_leave_room_for_the_prompt(tiny_tokenizer) -> None:
             _RecordingModel(), tiny_tokenizer, ["SELECT"], device=torch.device("cpu"),
             max_new_tokens=128, max_length=128,
         )
+
+
+def test_counts_eval_prompts_that_will_be_truncated(tiny_tokenizer) -> None:
+    prompts = ["x" * 10, "x" * 300, "x" * 301]
+    assert count_truncated_prompts(
+        tiny_tokenizer, prompts, max_length=308, max_new_tokens=8
+    ) == 1
+
+
+def test_truncation_count_ignores_special_tokens() -> None:
+    """Считается по той же токенизации, что и generate_sql: без BOS."""
+    assert count_truncated_prompts(
+        _BosTokenizer(), ["x" * 6], max_length=14, max_new_tokens=8
+    ) == 0
+
+
+def test_truncation_count_uses_the_generation_budget(tiny_tokenizer) -> None:
+    with pytest.raises(ValueError, match="max_new_tokens"):
+        count_truncated_prompts(tiny_tokenizer, ["SELECT"], max_length=128, max_new_tokens=128)

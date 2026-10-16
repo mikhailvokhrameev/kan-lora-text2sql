@@ -17,7 +17,7 @@ import torch
 
 from kanlora.data.collate import truncate_prompt
 
-__all__ = ["generate_sql", "normalize_sql"]
+__all__ = ["count_truncated_prompts", "generate_sql", "normalize_sql"]
 
 _WHITESPACE = re.compile(r"\s+")
 # Первый Markdown-блок: ``` в начале строки (как требует Markdown; ограда
@@ -85,6 +85,32 @@ def _cut_outside_quotes(text: str, cut_chars: str) -> str:
     return text
 
 
+def _prompt_budget(max_length: int, max_new_tokens: int) -> int:
+    budget = max_length - max_new_tokens
+    if budget <= 0:
+        raise ValueError(
+            f"max_new_tokens={max_new_tokens} не оставляет места промпту "
+            f"при max_length={max_length}"
+        )
+    return budget
+
+
+def count_truncated_prompts(
+    tokenizer, prompts: list[str], *, max_length: int, max_new_tokens: int
+) -> int:
+    """Сколько промптов generate_sql усечёт при тех же max_length и max_new_tokens.
+
+    Число идёт в карточку рядом с числом усечений на обучении: бюджет на оценке
+    (max_length − max_new_tokens) меньше обучающего (max_length − длина ответа),
+    и промпт между ними усекается только на оценке.
+    """
+    budget = _prompt_budget(max_length, max_new_tokens)
+    return sum(
+        len(tokenizer(prompt, add_special_tokens=False)["input_ids"]) > budget
+        for prompt in prompts
+    )
+
+
 @torch.inference_mode()
 def generate_sql(
     model,
@@ -107,12 +133,7 @@ def generate_sql(
     Генерация обрывается на tokenizer.eos_token_id (у Qwen2.5-Instruct это
     <|im_end|>, конец реплики), которым encode завершает ответ при обучении.
     """
-    budget = max_length - max_new_tokens
-    if budget <= 0:
-        raise ValueError(
-            f"max_new_tokens={max_new_tokens} не оставляет места промпту "
-            f"при max_length={max_length}"
-        )
+    budget = _prompt_budget(max_length, max_new_tokens)
 
     model.to(device)
     model.eval()
