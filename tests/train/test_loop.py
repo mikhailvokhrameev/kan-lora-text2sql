@@ -7,16 +7,17 @@
 исключения сама по себе.
 """
 
+import copy
+
 import pytest
 import torch
+from conftest import unfreeze_embeddings, unfreeze_norms
 
 from kanlora.adapters.base import AdapterConfig
-from kanlora.adapters.inject import inject_adapters
+from kanlora.adapters.inject import adapter_modules, inject_adapters
 from kanlora.data.collate import IGNORE_INDEX, Collator
 from kanlora.train.loop import TrainConfig, set_seed, train
 from kanlora.train.optimizers import OptimizerConfig
-
-from conftest import unfreeze_embeddings, unfreeze_norms
 
 VOCAB_SIZE = 64
 DEVICE = torch.device("cpu")
@@ -158,6 +159,49 @@ def test_reports_fraction_inside_grid_per_epoch(tiny_causal_lm) -> None:
 
 
 @pytest.mark.slow
+def test_fraction_inside_grid_is_the_epoch_mean_not_the_last_microbatch(
+    tiny_causal_lm,
+) -> None:
+    """Значение за эпоху — среднее по всем проходам эпохи; сброс в начале каждой эпохи."""
+    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
+    adapters = [module for _, module in adapter_modules(tiny_causal_lm)]
+
+    # Запись долей, которые адаптеры видят на каждом проходе, по порядку вызовов.
+    recorded: list[list[float]] = [[] for _ in adapters]
+    for values, module in zip(recorded, adapters):
+        original = module.kan.fraction_inside_grid
+
+        def spy(x, original=original, values=values):
+            fraction = original(x)
+            values.append(fraction.item())
+            return fraction
+
+        module.kan.fraction_inside_grid = spy
+
+    epochs, batches_per_epoch = 3, 5  # 20 примеров по 4, без накопления и чекпоинтинга
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
+        train_config=TrainConfig(epochs=epochs, batch_size=4, gradient_accumulation=1,
+                                 gradient_checkpointing=False),
+        device=DEVICE,
+    )
+
+    expected, last_microbatch = [], []
+    for epoch in range(epochs):
+        window = slice(epoch * batches_per_epoch, (epoch + 1) * batches_per_epoch)
+        per_adapter = [sum(values[window]) / batches_per_epoch for values in recorded]
+        expected.append(sum(per_adapter) / len(per_adapter))
+        last_microbatch.append(sum(values[window][-1] for values in recorded) / len(recorded))
+
+    assert len(report.fraction_inside_grid) == epochs
+    assert report.fraction_inside_grid == pytest.approx(expected)
+    assert report.fraction_inside_grid != pytest.approx(last_microbatch)
+
+
+@pytest.mark.slow
 def test_linear_methods_report_no_grid_statistics(tiny_causal_lm) -> None:
     inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
 
@@ -246,3 +290,109 @@ def test_report_carries_timing_memory_and_coverage(tiny_causal_lm) -> None:
     assert report.peak_memory_bytes == 0  # на процессоре замера нет, и это честно видно
     assert report.optimizer_coverage["muon"] > 0
     assert len(report.step_losses) == 5
+
+
+def test_validation_loss_is_measured_at_step_zero_and_after_every_epoch(tiny_causal_lm) -> None:
+    """Учебник §3.7 и лекция 5 MLOps: кривая на валидации начинается с шага 0.
+
+    Значение на шаге 0 — функция потерь ещё не обученной модели; после
+    обучения на тех же примерах (переобучение на 20 примерах) она падает.
+    """
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+    validation = twenty_examples(seed=1)[:6]
+    collator = Collator(pad_token_id=0)
+
+    tiny_causal_lm.eval()
+    with torch.no_grad():
+        # Та же разбивка на батчи, что у цикла (batch_size=4): 4 + 2 примера.
+        untrained = [
+            tiny_causal_lm(**collator(validation[start:start + 4])).loss.item()
+            for start in (0, 4)
+        ]
+
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=collator,
+        optimizer_config=OptimizerConfig(learning_rate=1e-2),
+        train_config=TrainConfig(epochs=3, batch_size=4, gradient_accumulation=1,
+                                 gradient_checkpointing=False),
+        device=DEVICE,
+        validation_dataset=validation,
+    )
+
+    assert len(report.validation_losses) == 3 + 1
+    assert report.validation_losses[0] == pytest.approx(sum(untrained) / len(untrained))
+    assert all(isinstance(value, float) for value in report.validation_losses)
+
+
+def test_validation_passes_do_not_touch_training_statistics(tiny_causal_lm) -> None:
+    """Проходы по валидации не входят ни в функцию потерь эпохи, ни в долю активаций в сетке."""
+    reports = []
+    for validation in (None, twenty_examples(seed=1)[:6]):
+        set_seed(0)
+        model = copy.deepcopy(tiny_causal_lm)
+        inject_adapters(model, "kan_lora", AdapterConfig(rank=4))
+        reports.append(
+            train(
+                model=model,
+                dataset=twenty_examples(),
+                collator=Collator(pad_token_id=0),
+                optimizer_config=OptimizerConfig(learning_rate=1e-3),
+                train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=1,
+                                         gradient_checkpointing=False),
+                device=DEVICE,
+                validation_dataset=validation,
+            )
+        )
+
+    without, with_validation = reports
+    assert without.validation_losses == []
+    assert with_validation.step_losses == pytest.approx(without.step_losses)
+    assert with_validation.fraction_inside_grid == pytest.approx(without.fraction_inside_grid)
+
+
+def test_report_records_gradient_norm_before_clipping(tiny_causal_lm) -> None:
+    """Норма до обрезания — по одной на шаг оптимизатора; после обрезания она была бы ≤ порога."""
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+
+    report = train(
+        model=tiny_causal_lm,
+        dataset=twenty_examples(),
+        collator=Collator(pad_token_id=0),
+        optimizer_config=OptimizerConfig(learning_rate=1e-3, max_grad_norm=1e-6),
+        train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=2,
+                                 gradient_checkpointing=False),
+        device=DEVICE,
+    )
+
+    # 5 батчей на эпоху, группы по 2: шаги после 2-го, 4-го и 5-го батча.
+    assert len(report.grad_norms) == 2 * 3
+    assert all(norm > 1e-6 for norm in report.grad_norms)
+
+
+def test_incomplete_accumulation_group_is_divided_by_its_actual_size(tiny_causal_lm) -> None:
+    """Хвост эпохи короче gradient_accumulation: делить надо на его длину, а не на 8.
+
+    5 батчей при gradient_accumulation=8 — одна неполная группа из 5. Её градиент
+    обязан совпасть с градиентом одного батча из тех же 20 примеров; деление на 8
+    занизило бы его в 8/5 раза.
+    """
+    reference = copy.deepcopy(tiny_causal_lm)
+    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
+    inject_adapters(reference, "lora", AdapterConfig(rank=4))
+    reference.load_state_dict(tiny_causal_lm.state_dict())
+
+    common = {
+        "dataset": twenty_examples(),
+        "collator": Collator(pad_token_id=0),
+        "optimizer_config": OptimizerConfig(learning_rate=0.01),
+        "device": DEVICE,
+    }
+    whole = train(model=tiny_causal_lm, train_config=TrainConfig(
+        epochs=1, batch_size=20, gradient_accumulation=1, gradient_checkpointing=False), **common)
+    tail = train(model=reference, train_config=TrainConfig(
+        epochs=1, batch_size=4, gradient_accumulation=8, gradient_checkpointing=False), **common)
+
+    assert len(tail.grad_norms) == 1
+    assert tail.grad_norms[0] == pytest.approx(whole.grad_norms[0], rel=1e-4)

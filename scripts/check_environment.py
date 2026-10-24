@@ -12,7 +12,6 @@ torch.optim, скачаны ли данные токенизатора nltk (`pu
 from __future__ import annotations
 
 import argparse
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 

@@ -8,7 +8,6 @@
 
 import pytest
 import torch
-from torch import nn
 
 from kanlora.adapters.base import AdapterConfig, AdapterLinear
 from kanlora.adapters.inject import (

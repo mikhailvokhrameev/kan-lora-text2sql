@@ -168,8 +168,7 @@ def exact_match(
   совпадает с тем, что раньше строил ручной разбор `tables.json` внутри
   этого модуля — нижний регистр имён, отброшенный столбец `*`
   (`test_schema_dict_matches_hand_built_lowercase_format`). Регрессия на
-  переход к общему парсеру из `data/schema.py` (задача 10 плана
-  code-review-fixes).
+  переход к общему парсеру из `data/schema.py`.
 
 ## Смежные модули
 

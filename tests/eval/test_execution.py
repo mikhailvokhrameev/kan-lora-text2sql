@@ -6,6 +6,7 @@
 """
 
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,26 @@ def test_executes_and_returns_rows(root: Path) -> None:
     outcome = execute_query(root / "database" / DB / f"{DB}.sqlite", "SELECT count(*) FROM item")
     assert outcome.failed is False
     assert outcome.rows == [(3,)]
+
+
+def test_endless_query_is_interrupted_by_timeout(root: Path) -> None:
+    # Бесконечный рекурсивный CTE: без настоящего дедлайна исполнения
+    # fetchall() не вернулся бы никогда (connect(timeout=...) этого не покрывает).
+    endless = (
+        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) "
+        "SELECT count(*) FROM c"
+    )
+    database = root / "database" / DB / f"{DB}.sqlite"
+
+    started = time.monotonic()
+    outcome = execute_query(database, endless, timeout=0.3)
+    elapsed = time.monotonic() - started
+
+    assert outcome.failed is True
+    assert outcome.rows is None
+    assert elapsed < 5.0
+    # после прерывания база остаётся пригодной: соединение закрыто, файл не заблокирован
+    assert execute_query(database, "SELECT count(*) FROM item").rows == [(3,)]
 
 
 def test_broken_query_is_reported_not_raised(root: Path) -> None:

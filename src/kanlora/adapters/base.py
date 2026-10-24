@@ -103,8 +103,8 @@ class AdapterLinear(nn.Module, ABC):
     def trainable_parameter_count(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def last_fraction_inside_grid(self) -> float | None:
-        """Доля активаций внутри сетки сплайна на последнем проходе.
+    def mean_fraction_inside_grid(self) -> float | None:
+        """Средняя доля активаций внутри сетки сплайна по обучающим проходам.
 
         По умолчанию `None` — статистика есть только у KAN-LoRA. Метод живёт
         здесь, а не проверяется через isinstance в цикле обучения, чтобы
@@ -112,6 +112,9 @@ class AdapterLinear(nn.Module, ABC):
         напрямую.
         """
         return None
+
+    def reset_fraction_inside_grid(self) -> None:
+        """Сбрасывает накопленную статистику сетки. По умолчанию нечего сбрасывать."""
 
     def merge(self) -> nn.Linear:
         """Возвращает обычный nn.Linear с поглощённой поправкой."""

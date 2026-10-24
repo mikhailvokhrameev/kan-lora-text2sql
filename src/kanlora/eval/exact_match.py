@@ -99,7 +99,7 @@ def exact_match_by_hardness(
             predicted_sql = rebuild_sql_val(predicted_sql)
             predicted_sql = rebuild_sql_col(predicted_valid_col_units, predicted_sql, kmap)
             matched = bool(evaluator.eval_exact_match(predicted_sql, gold_sql))
-        except Exception:
+        except Exception:  # noqa: BLE001 — вендорный разборщик Spider бросает что угодно на неразбираемом SQL
             # Модель регулярно выдаёт неразбираемый текст. Это промах,
             # а не повод уронить оценку всего прогона.
             matched = False

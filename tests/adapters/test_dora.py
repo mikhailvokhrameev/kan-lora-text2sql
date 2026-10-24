@@ -3,7 +3,9 @@
 DoRA раскладывает вес на модуль и направление: W = m * V / ||V||, где норма
 берётся построчно, по каждому выходному каналу. Тесты закрепляют два факта,
 без которых сравнение теряет смысл: старт из немодифицированной модели и
-сводимость к LoRA, когда модуль равен норме поправленного веса.
+сводимость к LoRA, когда модуль равен норме поправленного веса. Третий факт —
+норма направления в знаменателе отсоединена от графа (разд. 4.3 статьи DoRA,
+так же в PEFT): градиент через неё не идёт.
 """
 
 import pytest
@@ -114,6 +116,38 @@ def test_gradients_reach_magnitude_and_both_matrices(adapter: DoRALinear) -> Non
         assert parameter.grad is not None, name
         assert torch.isfinite(parameter.grad).all(), name
     assert adapter.base.weight.grad is None
+
+
+def test_gradient_does_not_flow_through_direction_norm(
+    base: nn.Linear, adapter: DoRALinear
+) -> None:
+    """Эталон: W_eff = m * V / c, где c = ||V|| - константа (detach).
+
+    Отсоединена только норма в знаменателе: числитель V и вектор m сохраняют
+    градиент. Значения прямого прохода от detach не меняются, поэтому
+    сравниваются именно градиенты по lora_a, lora_b и magnitude. Если пропустить
+    градиент через норму, градиенты расходятся с эталоном.
+    """
+    torch.manual_seed(2)
+    with torch.no_grad():
+        adapter.lora_b.normal_()
+        adapter.magnitude.mul_(1.3)
+    x = torch.randn(5, IN_FEATURES, dtype=torch.float64)
+    target = torch.randn(5, OUT_FEATURES, dtype=torch.float64)
+
+    ((adapter(x) * target).sum()).backward()
+
+    lora_a = adapter.lora_a.detach().clone().requires_grad_()
+    lora_b = adapter.lora_b.detach().clone().requires_grad_()
+    magnitude = adapter.magnitude.detach().clone().requires_grad_()
+    direction = base.weight + adapter.scaling * (lora_b @ lora_a)
+    constant_norm = direction.norm(dim=1, keepdim=True).detach()
+    weight = magnitude.unsqueeze(1) * direction / constant_norm
+    ((torch.nn.functional.linear(x, weight, base.bias) * target).sum()).backward()
+
+    assert torch.allclose(adapter.lora_a.grad, lora_a.grad, atol=1e-10)
+    assert torch.allclose(adapter.lora_b.grad, lora_b.grad, atol=1e-10)
+    assert torch.allclose(adapter.magnitude.grad, magnitude.grad, atol=1e-10)
 
 
 def test_matrix_parameters_are_lora_a_and_lora_b(adapter: DoRALinear) -> None:

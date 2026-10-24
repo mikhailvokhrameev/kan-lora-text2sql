@@ -15,13 +15,32 @@ import re
 
 import torch
 
-__all__ = ["generate_sql", "normalize_sql"]
+from kanlora.data.collate import truncate_prompt
+
+__all__ = ["count_truncated_prompts", "generate_sql", "normalize_sql"]
 
 _WHITESPACE = re.compile(r"\s+")
+# Первый Markdown-блок: ``` в начале строки (как требует Markdown; ограда
+# посреди строки блоком не считается), необязательный тег языка до перевода
+# строки (с пробелами вокруг и \r\n), содержимое до закрывающей ограды или до
+# конца текста (генерация могла оборваться по max_new_tokens раньше, чем
+# модель закрыла блок).
+_FENCED_BLOCK = re.compile(
+    r"^[ \t]*```(?:[ \t]*[\w+-]*[ \t]*\r?\n)?(.*?)(?:```|\Z)", re.DOTALL | re.MULTILINE
+)
 
 
 def normalize_sql(text: str) -> str:
     """Обрезает продолжение после запроса и приводит пробелы к одному виду.
+
+    Если в тексте есть Markdown-блок кода (```sql ... ``` или ``` ... ```,
+    ограда в начале строки) с непустым содержимым, берётся содержимое первого
+    такого блока и режется только по первой `;`:
+    перевод строки внутри блока — часть многострочного запроса. Instruct-модель
+    без дообучения обычно отвечает именно так, и резка по первому переводу
+    строки оставила бы от ответа строку ```sql. Правило общее для всех
+    методов, включая базовую модель без адаптера; на ответ без ограды оно не
+    влияет.
 
     Модель охотно пишет дальше собственный следующий вопрос; всё после первого
     перевода строки или точки с запятой к ответу не относится. Резать нужно
@@ -29,7 +48,15 @@ def normalize_sql(text: str) -> str:
     оказавшиеся частью значения (`WHERE name = 'a;b'`), обрежут ещё валидный
     запрос.
     """
-    head = _cut_outside_quotes(text, "\n;")
+    fenced = _FENCED_BLOCK.search(text)
+    if fenced is not None and fenced.group(1).strip():
+        # Границу ответа уже задала ограда, а SQL в блоке обычно многострочный:
+        # внутри блока режется только по `;`.
+        head = _cut_outside_quotes(fenced.group(1), ";")
+    else:
+        # Пустой блок (например, запрос и за ним одинокая ```) ответом не
+        # считается — действует правило без ограды.
+        head = _cut_outside_quotes(text, "\n;")
     return _WHITESPACE.sub(" ", head).strip()
 
 
@@ -58,6 +85,32 @@ def _cut_outside_quotes(text: str, cut_chars: str) -> str:
     return text
 
 
+def _prompt_budget(max_length: int, max_new_tokens: int) -> int:
+    budget = max_length - max_new_tokens
+    if budget <= 0:
+        raise ValueError(
+            f"max_new_tokens={max_new_tokens} не оставляет места промпту "
+            f"при max_length={max_length}"
+        )
+    return budget
+
+
+def count_truncated_prompts(
+    tokenizer, prompts: list[str], *, max_length: int, max_new_tokens: int
+) -> int:
+    """Сколько промптов generate_sql усечёт при тех же max_length и max_new_tokens.
+
+    Число идёт в карточку рядом с числом усечений на обучении: бюджет на оценке
+    (max_length − max_new_tokens) меньше обучающего (max_length − длина ответа),
+    и промпт между ними усекается только на оценке.
+    """
+    budget = _prompt_budget(max_length, max_new_tokens)
+    return sum(
+        len(tokenizer(prompt, add_special_tokens=False)["input_ids"]) > budget
+        for prompt in prompts
+    )
+
+
 @torch.inference_mode()
 def generate_sql(
     model,
@@ -65,34 +118,61 @@ def generate_sql(
     prompts: list[str],
     *,
     device: torch.device,
+    max_length: int,
     batch_size: int = 8,
     max_new_tokens: int = 128,
 ) -> list[str]:
+    """Жадно генерирует SQL для готовых промптов.
+
+    Промпты строит kanlora.data.collate.build_prompts — та же функция, что и
+    при обучении: шаблон диалога токенизатора с add_generation_prompt=True.
+    Каждый промпт усекается до max_length − max_new_tokens токенов функцией
+    collate.truncate_prompt — тем же правилом и с той же токенизацией
+    (add_special_tokens=False), что и в collate.encode при обучении, так что
+    длинную схему модель видит на оценке так же, как видела на обучении.
+    Генерация обрывается на tokenizer.eos_token_id (у Qwen2.5-Instruct это
+    <|im_end|>, конец реплики), которым encode завершает ответ при обучении.
+    """
+    budget = _prompt_budget(max_length, max_new_tokens)
+
     model.to(device)
     model.eval()
     model.config.use_cache = True
 
-    previous_side = tokenizer.padding_side
-    tokenizer.padding_side = "left"
-    try:
-        generated: list[str] = []
-        for start in range(0, len(prompts), batch_size):
-            chunk = prompts[start : start + batch_size]
-            encoded = tokenizer(chunk, return_tensors="pt", padding=True).to(device)
+    generated: list[str] = []
+    for start in range(0, len(prompts), batch_size):
+        chunk = [
+            truncate_prompt(tokenizer, prompt, budget)
+            for prompt in prompts[start : start + batch_size]
+        ]
+        input_ids, attention_mask = _pad_left(chunk, tokenizer.pad_token_id)
+        input_ids, attention_mask = input_ids.to(device), attention_mask.to(device)
 
-            output = model.generate(
-                **encoded,
-                max_new_tokens=max_new_tokens,
-                do_sample=False,
-                num_beams=1,
-                pad_token_id=tokenizer.pad_token_id,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-            continuation = output[:, encoded["input_ids"].shape[1] :]
-            generated.extend(
-                normalize_sql(text)
-                for text in tokenizer.batch_decode(continuation, skip_special_tokens=True)
-            )
-        return generated
-    finally:
-        tokenizer.padding_side = previous_side
+        output = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            num_beams=1,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+        continuation = output[:, input_ids.shape[1] :]
+        generated.extend(
+            normalize_sql(text)
+            for text in tokenizer.batch_decode(continuation, skip_special_tokens=True)
+        )
+    return generated
+
+
+def _pad_left(
+    sequences: list[list[int]], pad_token_id: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Дополняет слева до самой длинной последовательности пакета."""
+    width = max(len(sequence) for sequence in sequences)
+    input_ids = [[pad_token_id] * (width - len(seq)) + seq for seq in sequences]
+    attention_mask = [[0] * (width - len(seq)) + [1] * len(seq) for seq in sequences]
+    return (
+        torch.tensor(input_ids, dtype=torch.long),
+        torch.tensor(attention_mask, dtype=torch.long),
+    )

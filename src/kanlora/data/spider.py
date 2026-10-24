@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-__all__ = ["DatasetLayout", "SPIDER_LAYOUT"]
+__all__ = ["SPIDER_LAYOUT", "DatasetLayout"]
 
 
 @dataclass(frozen=True)

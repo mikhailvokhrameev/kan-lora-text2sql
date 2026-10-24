@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,9 @@ __all__ = [
     "execution_accuracy",
     "results_match",
 ]
+
+# Как часто (в инструкциях виртуальной машины sqlite) проверяется дедлайн.
+_PROGRESS_STEP = 1000
 
 
 @dataclass(frozen=True)
@@ -41,11 +45,23 @@ def execute_query(db_path: Path, query: str, timeout: float = 30.0) -> Execution
     try:
         connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout)
         connection.text_factory = lambda value: value.decode("utf-8", errors="replace")
+        # `timeout` в connect() — лишь ожидание блокировки файла, а не время
+        # исполнения: декартово произведение или бесконечный рекурсивный CTE из
+        # ответа модели повесили бы оценку. Поэтому тот же `timeout` служит ещё и
+        # дедлайном исполнения: обработчик прогресса вызывается каждые
+        # _PROGRESS_STEP инструкций виртуальной машины sqlite и при истечении
+        # дедлайна возвращает ненулевое значение — запрос прерывается ошибкой
+        # `interrupted`, которая ниже превращается в обычный промах.
+        deadline = time.monotonic() + timeout
+        connection.set_progress_handler(
+            lambda: 1 if time.monotonic() > deadline else 0, _PROGRESS_STEP
+        )
         return ExecutionOutcome(connection.execute(query).fetchall(), False)
-    except Exception:
+    except Exception:  # noqa: BLE001 — любая ошибка исполнения предсказанного запроса — промах
         return ExecutionOutcome(None, True)
     finally:
         if connection is not None:
+            connection.set_progress_handler(None, 0)
             connection.close()
 
 

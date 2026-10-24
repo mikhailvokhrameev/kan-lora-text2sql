@@ -1,0 +1,87 @@
+{
+  "adapted_modules": 0,
+  "config": {
+    "adapter": {
+      "alpha": 16.0,
+      "grid_size": 5,
+      "learn_input_scale": true,
+      "rank": 8,
+      "spline_order": 3
+    },
+    "data_root": "data",
+    "dataset": "spider",
+    "eval_batch_size": 8,
+    "eval_limit": 50,
+    "max_length": 768,
+    "max_new_tokens": 128,
+    "method": "none",
+    "model_name": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+    "optimizer": {
+      "learning_rate": 0.0002,
+      "max_grad_norm": 1.0,
+      "name": "adamw",
+      "weight_decay": 0.0
+    },
+    "seed": 0,
+    "subsample_seed": 12345,
+    "train": {
+      "batch_size": 1,
+      "epochs": 1,
+      "gradient_accumulation": 8,
+      "gradient_checkpointing": true,
+      "log_every": 20
+    },
+    "train_subset": 200,
+    "validation_size": 200
+  },
+  "data_files": {
+    "dev.json": "30d64a3fccde493226df79687aed9e4a1c0129525baf44f29c0573d914d758a4",
+    "tables.json": "61bb20aa401f03164e2d7f3b16509b7b5f79cc9c943ca7bd159046df1159e2ed",
+    "train_spider.json": "c43d0d72e59e1a9e1a60837da9bf70d5a6277226bdb7f634d544f380646f527a"
+  },
+  "dataset": "spider",
+  "epoch_losses": null,
+  "fraction_inside_grid": null,
+  "git_commit": "2ab3526fb6b1268fe1aed9878bffa226d292c3e9",
+  "grad_norms": null,
+  "latency": {
+    "device": "cpu",
+    "merged": false,
+    "seconds_per_token": 0.053784718315152226,
+    "tokens": 128,
+    "total_seconds": 6.884443944339485
+  },
+  "method": "none",
+  "metrics": {
+    "eval_truncated_prompts": 0,
+    "evaluated": 50,
+    "exact_match": 0.24,
+    "exact_match_by_hardness": {
+      "all": 0.24,
+      "easy": 0.3333333333333333,
+      "extra": 0.0,
+      "hard": 0.3076923076923077,
+      "medium": 0.2222222222222222
+    },
+    "execution_accuracy": 0.44,
+    "truncated_prompts": null
+  },
+  "model_revision": "ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+  "optimizer": null,
+  "optimizer_coverage": null,
+  "peak_memory_bytes": null,
+  "run_id": "none-spider-seed0",
+  "seed": 0,
+  "spline_stats": null,
+  "step_losses": null,
+  "total_parameters": 494032768,
+  "train_seconds": null,
+  "trainable_parameters": null,
+  "validation_losses": null,
+  "versions": {
+    "cuda": "нет",
+    "python": "3.12.4",
+    "torch": "2.14.0",
+    "transformers": "5.17.0"
+  }
+}

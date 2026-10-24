@@ -33,8 +33,8 @@ PAUQ, ради которого набор PAUQ вообще привлечён.
   обхода промежуточных словарей.
 - `serialize_schema(schema: DatabaseSchema) -> str` — одна строка вида
   `table: col, col | table: col`. Формат зафиксирован и одинаков для всех
-  прогонов всех трёх методов: он идёт прямо в промпт модели (реализация
-  промпта — задача 9, ещё не сделана), и его изменение задним числом
+  прогонов всех трёх методов: он идёт прямо в промпт модели (см.
+  [`collate.md`](collate.md)), и его изменение задним числом
   обесценило бы уже полученные результаты.
 
 `load_schemas` — единственное место в проекте, которое разбирает
@@ -123,7 +123,7 @@ PAUQ — это Spider, переведённый и локализованный
   пробел (`" ".join(query.split())`) — исходные файлы Spider/PAUQ не
   гарантируют единообразного форматирования SQL, а несогласованные пробелы
   в целевой строке иначе просачивались бы в маску функции потерь при
-  токенизации (задача 9). Схлопывание пробелов заодно не трогает точку с
+  токенизации ([`collate.md`](collate.md)). Схлопывание пробелов заодно не трогает точку с
   запятой на конце запроса PAUQ (`"...LIMIT 1;"`) — она остаётся в целевой
   строке, но не мешает ни официальному парсеру Spider (токенизатор явно
   пропускает `;`), ни `sqlite3.execute` (терпит один завершающий `;`).
@@ -135,9 +135,8 @@ PAUQ — это Spider, переведённый и локализованный
 
 `database_path(root: Path, layout: DatasetLayout, db_id: str) -> Path` —
 `root / layout.database_dir / db_id / f"{db_id}.sqlite"`. Единая точка,
-которой будет пользоваться Execution Accuracy (задача 14, ещё не
-реализована), чтобы путь к базе не собирался наново в каждом месте, где он
-нужен.
+которой пользуется Execution Accuracy ([`execution.md`](execution.md)),
+чтобы путь к базе не собирался наново в каждом месте, где он нужен.
 
 `LAYOUTS: dict[str, DatasetLayout] = {"spider": SPIDER_LAYOUT, "pauq": PAUQ_LAYOUT}`
 — реестр по имени набора из конфигурации прогона.
@@ -163,6 +162,35 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
 потеряло бы доказательную силу. Поэтому `subsample` детерминирована по
 `(examples, size, seed)` и не зависит ни от какого глобального генератора
 случайных чисел.
+
+## Валидационная выборка (`validation_subsample`)
+
+```python
+def validation_subsample(
+    examples: list[Text2SqlExample], train_size: int, size: int, seed: int
+) -> list[Text2SqlExample]
+```
+
+Отдельной валидационной выборки в Spider и PAUQ нет, а dev служит тестовой
+(на ней считаются Exact Match и Execution Accuracy), поэтому подбирать
+что-либо по dev нельзя (учебник, §3.7). Валидация берётся из train: из
+примеров, **не вошедших** в обучающую подвыборку.
+
+Алгоритм:
+
+1. Если `train_size >= len(examples)`, вся train уже обучающая, и
+   возвращается пустой список (валидационная функция потерь не считается).
+2. Индексы обучающей подвыборки восстанавливаются тем же вызовом
+   `random.Random(seed).sample(range(len(examples)), train_size)`, что и в
+   `subsample`. Отдельного состояния нет: обучающая подвыборка совпадает с
+   той, что была до появления валидации, и методика обучения не меняется.
+3. Из оставшихся индексов выбирается `size` штук через
+   `random.Random(seed).sample(...)` (то же `subsample_seed`), индексы
+   сортируются; если оставшихся меньше `size`, берутся все.
+
+Размер задаётся в конфигурации полем `validation_size` (200 в `base.yaml`
+и `smoke.yaml`). Выборка одна для всех методов и всех зёрен обучения — по
+той же причине, что и обучающая подвыборка.
 
 ## Проверенные инварианты
 
@@ -194,16 +222,19 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
   (`test_subsample_does_not_depend_on_the_training_seed`), а запрошенный
   размер, превышающий выборку, возвращает выборку целиком
   (`test_subsample_keeps_everything_when_size_exceeds_the_set`).
+- Валидационная выборка не пересекается с обучающей подвыборкой
+  (`test_validation_subsample_does_not_overlap_the_training_subsample`),
+  воспроизводима и не меняет обучающую подвыборку
+  (`test_validation_subsample_is_reproducible_and_leaves_training_untouched`),
+  а при нехватке примеров берёт все оставшиеся
+  (`test_validation_subsample_takes_what_is_left_when_short`).
 
-## Не реализовано
+## За пределами модуля
 
-- Само чтение баз данных SQLite (для Execution Accuracy, задача 14) —
-  `database_path` только строит путь, ничего не открывает.
+Чтение баз данных SQLite для Execution Accuracy описано в
+[`execution.md`](execution.md); `database_path` только строит путь, ничего
+не открывает.
 
 Промпт, токенизация и маска функции потерь по SQL, соединяющие
 `Text2SqlExample` и `DatabaseSchema` в вход модели, реализованы отдельно —
 см. `docs/collate.md` (`src/kanlora/data/collate.py`).
-
-Эти пункты не описываются подробнее здесь, чтобы не документировать
-несуществующее поведение; их интерфейсы зафиксированы в
-`docs/superpowers/plans/2026-09-09-kan-lora-text2sql.md`.

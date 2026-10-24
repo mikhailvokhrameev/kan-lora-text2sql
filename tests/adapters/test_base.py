@@ -71,9 +71,14 @@ def test_interface_cannot_be_instantiated_directly() -> None:
         AdapterLinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig())
 
 
-def test_default_last_fraction_inside_grid_is_none(adapter: ConstantAdapter) -> None:
+def test_default_mean_fraction_inside_grid_is_none(adapter: ConstantAdapter) -> None:
     """Линейные адаптеры не ведут статистику сетки — цикл обучения не обязан о них знать."""
-    assert adapter.last_fraction_inside_grid() is None
+    assert adapter.mean_fraction_inside_grid() is None
+
+
+def test_default_reset_fraction_inside_grid_is_a_noop(adapter: ConstantAdapter) -> None:
+    adapter.reset_fraction_inside_grid()
+    assert adapter.mean_fraction_inside_grid() is None
 
 
 def test_default_matrix_parameters_is_empty(adapter: ConstantAdapter) -> None:

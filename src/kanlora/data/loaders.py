@@ -30,6 +30,7 @@ __all__ = [
     "load_dataset_schemas",
     "load_examples",
     "subsample",
+    "validation_subsample",
 ]
 
 Split = Literal["train", "eval"]
@@ -89,6 +90,27 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
 
     indices = sorted(random.Random(seed).sample(range(len(examples)), size))
     return [examples[index] for index in indices]
+
+
+def validation_subsample(
+    examples: list[Text2SqlExample], train_size: int, size: int, seed: int
+) -> list[Text2SqlExample]:
+    """Валидационная выборка из train, не пересекающаяся с обучающей подвыборкой.
+
+    Обучающие индексы восстанавливаются тем же вызовом с тем же зерном, что
+    и в `subsample`, поэтому обучающая подвыборка не меняется от того, есть
+    валидация или нет. Из оставшихся примеров берётся `size` штук тем же
+    зерном; если их меньше — берутся все оставшиеся. Отдельной валидационной
+    выборки нет: dev служит тестовой, и подбирать что-либо по ней нельзя.
+    """
+    if train_size >= len(examples):
+        return []
+
+    taken = set(random.Random(seed).sample(range(len(examples)), train_size))
+    remaining = [index for index in range(len(examples)) if index not in taken]
+    if size < len(remaining):
+        remaining = sorted(random.Random(seed).sample(remaining, size))
+    return [examples[index] for index in remaining]
 
 
 LAYOUTS: dict[str, DatasetLayout] = {"spider": SPIDER_LAYOUT, "pauq": PAUQ_LAYOUT}

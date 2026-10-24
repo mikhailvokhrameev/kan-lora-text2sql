@@ -9,8 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from kanlora.config import load_config
-from kanlora.results import build_result_card, collect_versions, git_commit, write_result_card
+from kanlora.config import apply_overrides, load_config
+from kanlora.results import (
+    build_result_card,
+    collect_versions,
+    file_hashes,
+    write_result_card,
+)
 from kanlora.train.loop import TrainReport
 
 BASE = Path(__file__).parents[1] / "configs" / "base.yaml"
@@ -23,8 +28,9 @@ def card() -> dict:
         injection={"trainable_parameters": 1234, "total_parameters": 500000,
                    "replaced": ["model.layers.0.self_attn.q_proj"]},
         train_report=TrainReport(
-            step_losses=[2.0, 1.0], epoch_losses=[1.5], fraction_inside_grid=[0.87],
-            peak_memory_bytes=4_000_000_000, seconds=4200.0,
+            step_losses=[2.0, 1.0], epoch_losses=[1.5], validation_losses=[2.4, 1.6],
+            fraction_inside_grid=[0.87],
+            grad_norms=[0.8, 0.5], peak_memory_bytes=4_000_000_000, seconds=4200.0,
             optimizer_coverage={"adamw": 1234, "muon": 0},
         ),
         metrics={"exact_match": 0.41, "execution_accuracy": 0.55,
@@ -40,6 +46,15 @@ def test_card_carries_everything_needed_to_reproduce(card: dict) -> None:
         "peak_memory_bytes", "train_seconds", "trainable_parameters",
         "optimizer_coverage", "fraction_inside_grid", "spline_stats",
     }
+
+
+def test_card_carries_the_validation_loss_curve(card: dict) -> None:
+    """Значение на шаге 0 и после каждой эпохи — кривая, а не одно число."""
+    assert card["validation_losses"] == [2.4, 1.6]
+
+
+def test_card_carries_gradient_norms_before_clipping(card: dict) -> None:
+    assert card["grad_norms"] == [0.8, 0.5]
 
 
 def test_versions_include_the_libraries_that_affect_numbers() -> None:
@@ -85,3 +100,73 @@ def test_card_is_written_in_readable_utf8(card: dict, tmp_path: Path) -> None:
     card["note"] = "проверка"
     text = write_result_card(card, tmp_path).read_text(encoding="utf-8")
     assert "проверка" in text
+
+
+def test_baseline_card_leaves_training_fields_null() -> None:
+    """У базовой модели без адаптера нет обучения: обучаемых параметров, времени
+    обучения, оптимизатора и сеточных величин нет — null, а не ноль."""
+    config = apply_overrides(load_config(BASE), method="none")
+    card = build_result_card(
+        config=config,
+        injection={"trainable_parameters": None, "total_parameters": 500000, "replaced": []},
+        train_report=None,
+        metrics={"exact_match": 0.2, "execution_accuracy": None},
+        spline_stats=None,
+    )
+
+    assert card["method"] == "none"
+    assert card["run_id"] == "none-spider-seed0"
+    assert card["optimizer"] is None
+    assert card["total_parameters"] == 500000
+    for field in (
+        "trainable_parameters", "train_seconds", "peak_memory_bytes", "optimizer_coverage",
+        "step_losses", "epoch_losses", "validation_losses", "grad_norms", "fraction_inside_grid",
+        "spline_stats",
+    ):
+        assert card[field] is None, field
+    assert card["adapted_modules"] == 0
+
+
+def test_file_hashes_are_sha256_keyed_by_file_name(tmp_path: Path) -> None:
+    """Версия данных (лекции 1 и 3 MLOps): правка файла меняет хэш в карточке."""
+    import hashlib
+
+    first = tmp_path / "train.json"
+    first.write_bytes(b"[]")
+    hashes = file_hashes(tmp_path, ["train.json", "absent.json"])
+
+    assert hashes == {"train.json": hashlib.sha256(b"[]").hexdigest(), "absent.json": None}
+    first.write_bytes(b"[1]")
+    assert file_hashes(tmp_path, ["train.json"])["train.json"] != hashes["train.json"]
+
+
+def test_card_records_data_and_model_versions() -> None:
+    card = build_result_card(
+        config=load_config(BASE),
+        injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
+        train_report=TrainReport(),
+        metrics={"exact_match": 0.1, "execution_accuracy": None},
+        spline_stats=None,
+        data_files={"train_spider.json": "abc"},
+        model_revision="0123abcd",
+    )
+    assert card["data_files"] == {"train_spider.json": "abc"}
+    assert card["model_revision"] == "0123abcd"
+
+
+def test_card_records_generation_latency() -> None:
+    latency = {"seconds_per_token": 0.02, "total_seconds": 2.56, "tokens": 128,
+               "merged": False, "device": "cuda"}
+    card = build_result_card(
+        config=load_config(BASE),
+        injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
+        train_report=TrainReport(),
+        metrics={"exact_match": 0.1, "execution_accuracy": None},
+        spline_stats=None,
+        latency=latency,
+    )
+    assert card["latency"] == latency
+
+
+def test_latency_is_null_when_not_measured(card: dict) -> None:
+    assert card["latency"] is None

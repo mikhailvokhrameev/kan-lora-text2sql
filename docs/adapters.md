@@ -37,7 +37,7 @@ class AdapterConfig:
 правка поля в середине серии прогонов невозможна на уровне типов.
 
 `grid_size`, `spline_order` и `learn_input_scale` используются только
-KAN-LoRA-адаптером (пока не реализован); для LoRA и DoRA они игнорируются
+KAN-LoRA-адаптером; для LoRA и DoRA они игнорируются
 и хранятся в конфиге ради того, чтобы карточка результата содержала
 одинаковый набор полей для всех прогонов независимо от метода.
 
@@ -72,17 +72,18 @@ self.scaling = config.alpha / config.rank
 - `matrix_parameters() -> tuple[nn.Parameter, ...]` — параметры, реально
   задающие линейное отображение матричным умножением (`y = W @ x`), а не
   любые двумерные тензоры. По умолчанию пуст. Метод объявляет этот список на
-  уровне интерфейса; `train/optimizers.py` пока не читает его — там
-  разводка параметров на Muon/AdamW всё ещё идёт по размерности тензора
-  (`split_by_dimension`, см. `docs/optimizers.md`).
+  уровне интерфейса; по нему `train/optimizers.py` разводит параметры
+  между Muon и AdamW (`split_by_matrix_role`, см. `docs/optimizers.md`).
 - `trainable_parameter_count() -> int` — сумма `numel()` по параметрам с
   `requires_grad=True`. Так как `self.base` заморожен в конструкторе,
   веса основы в счётчик не попадают.
 - `merge() -> nn.Linear` — по умолчанию бросает `NotImplementedError`;
   переопределяется теми методами, у которых `can_merge is True`.
-- `last_fraction_inside_grid() -> float | None` — по умолчанию `None`.
-  Переопределён только в `KANLoRALinear`, где возвращает долю активаций
-  сплайна, попавших в сетку на последнем проходе. Существует на уровне
+- `mean_fraction_inside_grid() -> float | None` — по умолчанию `None`.
+  Переопределён только в `KANLoRALinear`, где возвращает среднюю по
+  обучающим проходам долю активаций сплайна, попавших в сетку.
+  `reset_fraction_inside_grid()` — сброс накопления, по умолчанию пустая
+  операция. Оба метода существуют на уровне
   интерфейса, а не проверяется через `isinstance(module, KANLoRALinear)` в
   цикле обучения, чтобы `train/loop.py` не знал о конкретных классах
   адаптеров и оставался общим для LoRA, DoRA и KAN-LoRA.
@@ -185,7 +186,7 @@ B-сплайновый базис определён на конечной се�
 ### `forward(x) -> Tensor`
 
 ```python
-scaled = x / self._safe_input_scale_divisor()
+scaled = x / self.input_scale_divisor()
 basis = bspline_basis(scaled, self.knots, self.spline_order)
 spline = einsum("...ib,oib->...oi", basis, self.spline_coefficients)
 base = silu(scaled).unsqueeze(-2) * self.base_weight
@@ -193,11 +194,11 @@ edges = base + self.spline_scale * spline
 return (edges * self.input_scale).sum(dim=-1)
 ```
 
-Обратите внимание: делителем служит `_safe_input_scale_divisor()`, а
+Обратите внимание: делителем служит `input_scale_divisor()`, а
 обратное умножение на выходе (`edges * self.input_scale`) использует сам
 параметр без изменений — см. ниже.
 
-### Пол на модуль `input_scale` (`_safe_input_scale_divisor`)
+### Пол на модуль `input_scale` (`input_scale_divisor`)
 
 `input_scale` — необученно ограниченный параметр: ничто не мешает
 градиентному спуску увести его модуль к нулю. Поскольку `input_scale`
@@ -212,7 +213,7 @@ return (edges * self.input_scale).sum(dim=-1)
 Защита — отдельный метод:
 
 ```python
-def _safe_input_scale_divisor(self) -> torch.Tensor:
+def input_scale_divisor(self) -> torch.Tensor:
     magnitude = self.input_scale.abs().clamp(min=_MIN_INPUT_SCALE_MAGNITUDE)
     return torch.copysign(magnitude, self.input_scale)
 ```
@@ -304,6 +305,34 @@ W_eff = m * V / ||V||_строк                  эффективный вес,
 где `A: (rank, in_features)`, `B: (out_features, rank)`, `m: (out_features,)`
 — обучаемый вектор модуля.
 
+### Норма направления отсоединена от графа (detach)
+
+В `effective_weight()` норма `||V||_строк` в знаменателе вычисляется как
+`direction.norm(dim=1, keepdim=True).detach()`: при обратном проходе она
+считается константой, градиент через неё не идёт. Формально
+
+```
+W_eff = m * V / c,    c = stopgrad(||V||_строк)
+```
+
+Градиент сохраняют вектор модуля `m` и числитель `V` (а значит, `A` и `B`);
+отсоединена только норма в знаменателе.
+
+**Это явное изменение формулировки DoRA** относительно первой версии
+реализации, где градиент шёл и через норму. Основание: разд. 4.3 статьи
+DoRA (Liu et al., 2024, «DoRA: Weight-Decomposed Low-Rank Adaptation») —
+норму `||W0 + BA||` предлагается считать константой при вычислении
+градиента, и ровно так сделано в реализации HF PEFT. Мотивация — память и
+время: без `detach` автоград хранит и проводит обратный проход через граф
+нормы по всей матрице `(out, in)` для каждого адаптируемого слоя; с `detach`
+этот кусок графа не строится. Значения прямого прохода и результат `merge()`
+не меняются (`detach` влияет только на градиенты), слияние остаётся точным.
+
+Следствие для сравнения методов: замеры времени и видеопамяти DoRA,
+сделанные до этого изменения (в частности, смоук DoRA на 593 с против 196 с
+у LoRA), **несопоставимы** с новыми — их нужно переснять; траектории
+обучения DoRA тоже слегка отличаются, потому что градиент другой.
+
 Замысел метода (за него DoRA отвечает на защите): при полной тонкой
 настройке модуль и направление веса меняются по независимым траекториям, а
 LoRA, добавляя поправку прямо к `W`, вынуждена менять их совместно.
@@ -330,9 +359,9 @@ LoRA: при `B = 0` направление `V` в точности равно `
 
 ### Методы
 
-- `effective_weight() -> Tensor` — вычисляет `W_eff` по формуле выше;
-  вызывается на каждом прямом проходе, а не кэшируется, так как
-  `lora_a`, `lora_b` и `magnitude` обучаемы.
+- `effective_weight() -> Tensor` — вычисляет `W_eff` по формуле выше (с
+  отсоединённой нормой, см. выше); вызывается на каждом прямом проходе,
+  а не кэшируется, так как `lora_a`, `lora_b` и `magnitude` обучаемы.
 - `forward(x) -> Tensor` — `linear(x, effective_weight(), base.bias)`.
 - `analytic_parameter_count() -> int` —
   `rank * (in_features + out_features) + out_features` (LoRA плюс вектор
@@ -406,21 +435,35 @@ delta_W * x = (alpha / r) * B * phi(A x)
 
 - `delta(x) -> Tensor` — вычисляет `A x`, пропускает через `kan`, применяет
   `B` и масштаб `scaling`. Попутно, как побочный эффект (`torch.no_grad()`),
-  сохраняет `kan.fraction_inside_grid(A x)` во внутреннее поле
-  `_fraction_inside_grid` — снимается на каждом проходе, а не отдельным
-  диагностическим прогоном. Значение хранится как `torch.Tensor`, без
-  `.item()`: перевод в `float` синхронизирует CPU с GPU и на каждом
-  forward-проходе был бы лишним барьером, тогда как `last_fraction_inside_grid()`
-  ниже вызывается всего раз в эпоху из `train()`.
+  прибавляет `kan.fraction_inside_grid(A x)` к накопителю — снимается на
+  каждом обучающем проходе, а не отдельным диагностическим прогоном.
+  Накопитель — два поля: `_fraction_sum` (`torch.Tensor` float32 на
+  устройстве слоя, независимо от dtype активаций, чтобы сумма не терялась в
+  bf16) и `_fraction_count` (обычное целое число проходов). `.item()` не
+  вызывается: перевод в `float` синхронизирует CPU с GPU и на каждом
+  forward-проходе был бы лишним барьером, тогда как `mean_fraction_inside_grid()`
+  ниже вызывается всего раз в эпоху из `train()`. Накопление идёт только при
+  `self.training`: генерация (`eval/generate.py`) и замер задержки
+  (`eval/latency.py`) переводят модель в `eval()`, и их активации в
+  статистику обучения не попадают. Выход `delta` от этого не зависит
+  (`test_fraction_inside_grid_does_not_change_forward_output`). Диапазон
+  `observed_range` обновляется во всех режимах, как и раньше.
 - `forward(x) -> Tensor` — `self.base(x) + self.delta(x)`.
-- `last_fraction_inside_grid() -> float | None` — последнее сохранённое
-  значение, переведённое в `float` через `.item()` в этом методе (а не в
-  `delta()`); `None` до первого прямого прохода.
+- `mean_fraction_inside_grid() -> float | None` — `_fraction_sum / _fraction_count`,
+  переведённое в `float` через `.item()` в этом методе (а не в `delta()`);
+  `None`, если с последнего сброса не было обучающих проходов. Среднее
+  берётся по проходам, каждый проход входит с одним весом (внутри прохода
+  доля считается по всем токенам микробатча, включая позиции паддинга).
+  При градиентном чекпоинтинге `delta` повторно выполняется при
+  пересчёте в обратном проходе — проход считается дважды с теми же
+  значениями, среднее не меняется.
+- `reset_fraction_inside_grid()` — обнуляет сумму и счётчик; цикл обучения
+  вызывает его в начале каждой эпохи.
 - `observed_range() -> tuple[float, float]` — фактический размах `A x`,
   накопленный поэлементным `min`/`max` за **все** прямые проходы с момента
   создания адаптера (буферы `observed_lo`, `observed_hi`, начальные значения
   `+inf`/`-inf`, обновляются в `delta` тем же блоком `torch.no_grad()`, что и
-  `_fraction_inside_grid`). До первого прохода возвращает `(inf, -inf)` —
+  накопителем доли). До первого прохода возвращает `(inf, -inf)` —
   намеренно немой, а не нулевой диапазон, потому что «данных ещё не было»
   обязано отличаться от «размах вырожден в точку». Используется
   `analysis/spline_stats.model_nonlinearity` (см. `docs/nonlinearity.md`)
@@ -445,10 +488,9 @@ delta_W * x = (alpha / r) * B * phi(A x)
   матричным умножением, а `spline_scale`/`base_weight`, несмотря на
   двумерную форму `(rank, rank)`, участвуют поэлементно
   (`spline_scale * spline`, `base_weight` под `silu`). Это тот критерий,
-  которым `train/optimizers.py` в перспективе должен будет разводить
-  параметры между Muon и AdamW вместо текущей разводки по голой
-  размерности тензора (`split_by_dimension`, см. `docs/optimizers.md`) —
-  на момент этой правки `optimizers.py` ещё не читает `matrix_parameters()`.
+  которым `train/optimizers.py` разводит параметры между Muon и AdamW
+  (`split_by_matrix_role`, см. `docs/optimizers.md`), а не по голой
+  размерности тензора.
 
 ## Проверенные инварианты
 
@@ -479,6 +521,10 @@ delta_W * x = (alpha / r) * B * phi(A x)
   `test_gradients_reach_magnitude_and_both_matrices` для DoRA,
   `test_gradients_reach_spline_coefficients` для KAN-LoRA, включая
   коэффициенты сплайна внутри `kan`).
+- Градиент не идёт через норму направления в знаменателе DoRA: градиенты по
+  `lora_a`, `lora_b`, `magnitude` совпадают с эталоном, где норма — константа
+  (`test_gradient_does_not_flow_through_direction_norm`; на коде без
+  `detach` тест падает).
 - DoRA при `magnitude`, равной норме адаптированного направления,
   поэлементно совпадает с LoRA
   (`test_reduces_to_lora_when_magnitude_matches_direction_norm`); KAN-LoRA
@@ -593,13 +639,10 @@ def adapter_modules(model: nn.Module) -> list[tuple[str, AdapterLinear]]
   внедряют часть адаптеров молча (`test_unknown_method_is_rejected`,
   `test_missing_target_module_is_rejected`).
 
-## Не реализовано
+## За пределами модуля
 
 - Чтение схемы БД и наборов данных Spider/PAUQ (`kanlora/data/`) описано
-  отдельно в `docs/data.md`.
-- Промпт, токенизация и маска функции потерь (`data/collate.py`, задача 9
-  плана) — соединяют внедрённую модель с данными; ещё не написаны.
-
-Эти пункты не описываются подробнее здесь, чтобы не документировать
-несуществующее поведение; их интерфейсы зафиксированы в
-`docs/superpowers/plans/2026-09-09-kan-lora-text2sql.md`.
+  отдельно в [`data.md`](data.md).
+- Промпт, токенизация и маска функции потерь (`data/collate.py`), которые
+  соединяют внедрённую модель с данными, описаны в
+  [`collate.md`](collate.md).

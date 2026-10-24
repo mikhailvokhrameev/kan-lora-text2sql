@@ -11,6 +11,8 @@ seed: 0
 
 train_subset: 200
 subsample_seed: 12345
+# Валидационная функция потерь: примеры train вне обучающей подвыборки.
+validation_size: 200
 
 max_length: 768
 eval_limit: 50
