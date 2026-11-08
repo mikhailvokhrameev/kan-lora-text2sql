@@ -93,11 +93,14 @@ def check_dataset(name: str, root: Path) -> list[Check]:
 
     layout = LAYOUTS[name]
     try:
-        load_dataset_schemas(root, layout)
+        schemas = load_dataset_schemas(root, layout)
         train = load_examples(root, layout, "train")
         dev = load_examples(root, layout, "eval")
         if not train or not dev:
             raise ValueError("пустое разбиение train или dev")
+        missing = sorted({example.db_id for example in (*train, *dev)} - schemas.keys())
+        if missing:
+            raise ValueError(f"нет схем для db_id: {', '.join(missing)}")
         checks.append(Check(f"{name}: JSON и поля", True, "train, dev и схемы прочитаны"))
         validate_execution_data(
             [example.query for example in dev], [example.db_id for example in dev], root, layout

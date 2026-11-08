@@ -86,7 +86,11 @@ def test_cuda_kernel_failure_is_reported(module, monkeypatch):
 def _dataset(root, queries):
     root.mkdir()
     entries = [{"db_id": db, "question": "q", "query": query} for db, query in queries]
-    files = (("train_spider.json", entries), ("dev.json", entries), ("tables.json", []))
+    schemas = [
+        {"db_id": db, "table_names_original": [], "column_names_original": []}
+        for db in sorted({db for db, _ in queries})
+    ]
+    files = (("train_spider.json", entries), ("dev.json", entries), ("tables.json", schemas))
     for name, content in files:
         (root / name).write_text(json.dumps(content))
 
@@ -109,3 +113,39 @@ def test_dataset_gold_error_is_reported(module, tmp_path):
     _dataset(root, [("a", "select * from missing")])
     _database(root, "a")
     assert any(not c.ok and "эталон" in c.detail for c in module.check_dataset("spider", root))
+
+
+def _write_schemas(root, db_ids):
+    schemas = [
+        {"db_id": db, "table_names_original": [], "column_names_original": []}
+        for db in db_ids
+    ]
+    (root / "tables.json").write_text(json.dumps(schemas))
+
+
+@pytest.mark.parametrize("missing_split", ["train", "dev"])
+def test_dataset_rejects_missing_schema_from_either_split(module, tmp_path, missing_split):
+    root = tmp_path / "spider"
+    _dataset(root, [("a", "select 1")])
+    _database(root, "a")
+    entries = [{"db_id": "b", "question": "q", "query": "select 1"}]
+    filename = "train_spider.json" if missing_split == "train" else "dev.json"
+    (root / filename).write_text(json.dumps(entries))
+    _database(root, "b")
+    _write_schemas(root, ["a"])
+
+    checks = module.check_dataset("spider", root)
+    assert any(not check.ok and "b" in check.detail for check in checks)
+
+
+def test_dataset_accepts_schemas_for_all_train_and_dev_examples(module, tmp_path):
+    root = tmp_path / "spider"
+    _dataset(root, [("a", "select 1")])
+    (root / "dev.json").write_text(json.dumps(
+        [{"db_id": "b", "question": "q", "query": "select 1"}]
+    ))
+    _database(root, "b")
+    _write_schemas(root, ["a", "b"])
+
+    checks = module.check_dataset("spider", root)
+    assert all(check.ok for check in checks), checks
