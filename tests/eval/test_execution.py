@@ -179,3 +179,11 @@ def test_database_disappearing_after_gold_is_data_error(root: Path, monkeypatch)
     with pytest.raises(RuntimeError, match=DB):
         execution.execution_accuracy(['SELECT * FROM item'], ['SELECT * FROM item'],
                                      [DB], root, SPIDER_LAYOUT)
+
+
+def test_prediction_attach_missing_database_is_model_miss(root: Path) -> None:
+    assert execution_accuracy(
+        ['SELECT * FROM item'],
+        ["ATTACH DATABASE '/nonexistent/unknown.sqlite' AS other"],
+        [DB], root, SPIDER_LAYOUT,
+    ) == 0.0

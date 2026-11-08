@@ -141,7 +141,7 @@ def execution_accuracy(
         if gold_result.failed:
             raise EvaluationDataError(f"{db_id}: ошибка исполнения эталона или чтения базы: {database}")
         predicted_result = execute_query(database, predicted_query)
-        if predicted_result.data_error:
+        if predicted_result.data_error and execute_query(database, gold_query).failed:
             raise EvaluationDataError(f"{db_id}: ошибка чтения базы: {database}")
         matched += int(results_match(gold_result, predicted_result, order_matters))
     return matched / len(gold)
