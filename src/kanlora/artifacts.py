@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import pickle
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,12 +10,12 @@ import torch
 from torch import nn
 
 from kanlora.adapters.base import AdapterConfig
-from kanlora.adapters.inject import inject_adapters
+from kanlora.adapters.inject import DEFAULT_TARGET_MODULES, inject_adapters
 from kanlora.config import ExperimentConfig, config_to_dict
 
 
 def new_run_id(config: ExperimentConfig) -> str:
-    return f'{config.run_id}-{uuid4().hex}'
+    return f'{config.method}-{config.dataset}-seed{config.seed}-{uuid4().hex}'
 
 
 def reserve_run_directory(output: Path, run_kind: str, run_id: str) -> Path:
@@ -42,17 +43,30 @@ def save_adapter(model: nn.Module, config: ExperimentConfig, path: Path) -> None
 
 
 def restore_adapter(model: nn.Module, path: Path) -> dict:
-    checkpoint = torch.load(path, map_location='cpu', weights_only=True)
-    config = checkpoint['config']
-    base = model.config
-    if (getattr(base, '_name_or_path', None) != config['model_name'] or
-            getattr(base, '_commit_hash', None) != config['model_revision']):
-        raise ValueError('имя или ревизия базовой модели не совпадает')
     try:
-        inject_adapters(model, config['method'], AdapterConfig(**config['adapter']))
+        checkpoint = torch.load(path, map_location='cpu', weights_only=True)
+        config = checkpoint['config']
+        tensors = checkpoint['tensors']
+        base = model.config
+        if (getattr(base, '_name_or_path', None) != config['model_name'] or
+                getattr(base, '_commit_hash', None) != config['model_revision']):
+            raise ValueError('имя или ревизия базовой модели не совпадает')
+        adapter_config = AdapterConfig(**config['adapter'])
+        method = config['method']
+        if not isinstance(tensors, dict) or not all(isinstance(t, torch.Tensor) for t in tensors.values()):
+            raise ValueError('некорректные тензоры checkpoint')
+    except (KeyError, TypeError, AttributeError, RuntimeError, EOFError, pickle.UnpicklingError) as error:
+        raise ValueError('несовместимый checkpoint или базовая модель') from error
+
+    # Сохраняем ссылки, а не копию всей базы: rollback возвращает исходные модули
+    # и requires_grad даже если внедрение или копирование оборвалось на середине.
+    targets = [(name, module) for name, module in model.named_modules()
+               if isinstance(module, nn.Linear) and name.split('.')[-1] in DEFAULT_TARGET_MODULES]
+    flags = [(parameter, parameter.requires_grad) for parameter in model.parameters()]
+    try:
+        inject_adapters(model, method, adapter_config)
         parameters = {name: parameter for name, parameter in model.named_parameters()
                       if parameter.requires_grad}
-        tensors = checkpoint['tensors']
         if set(parameters) != set(tensors) or any(
             parameters[name].shape != tensors[name].shape for name in parameters
         ):
@@ -60,6 +74,14 @@ def restore_adapter(model: nn.Module, path: Path) -> dict:
         with torch.no_grad():
             for name, parameter in parameters.items():
                 parameter.copy_(tensors[name])
-    except (KeyError, TypeError, RuntimeError) as error:
+    except Exception as error:
+        for name, original in targets:
+            parent_name, _, attribute = name.rpartition('.')
+            parent = model.get_submodule(parent_name) if parent_name else model
+            setattr(parent, attribute, original)
+        for parameter, flag in flags:
+            parameter.requires_grad_(flag)
+        if isinstance(error, ValueError):
+            raise
         raise ValueError('несовместимый checkpoint адаптера') from error
     return config

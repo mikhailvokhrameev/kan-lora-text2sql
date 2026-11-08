@@ -23,7 +23,8 @@ def test_adapter_roundtrip(method, tiny_causal_lm, tmp_path):
     config = apply_overrides(load_config(BASE), method=method)
     tiny_causal_lm.config._name_or_path = config.model_name
     tiny_causal_lm.config._commit_hash = config.model_revision
-    fresh = copy.deepcopy(tiny_causal_lm)
+    fresh = copy.deepcopy(tiny_causal_lm).eval()
+    tiny_causal_lm.eval()
     inject_adapters(tiny_causal_lm, method, config.adapter)
     optimizer = torch.optim.SGD((p for p in tiny_causal_lm.parameters() if p.requires_grad), lr=0.01)
     tokens = torch.tensor([[1, 2, 3]])
@@ -122,3 +123,48 @@ def test_predictions_recompute_metrics(tmp_path):
     db_ids = [row['db_id'] for row in rows]
     assert exact_match_by_hardness(gold, predicted, db_ids, tables) == card['metrics']['exact_match_by_hardness']
     assert execution_accuracy(gold, predicted, db_ids, tmp_path, SPIDER_LAYOUT) == card['metrics']['execution_accuracy']
+
+
+@pytest.mark.parametrize('payload', [{}, {'config': {}}, {'config': None}])
+def test_restore_rejects_malformed_checkpoint(payload, tiny_causal_lm, tmp_path):
+    path = tmp_path / 'bad.pt'
+    torch.save(payload, path)
+    with pytest.raises(ValueError):
+        restore_adapter(tiny_causal_lm, path)
+
+
+def test_restore_rejects_model_without_config(tmp_path):
+    path = tmp_path / 'bad.pt'
+    config = load_config(BASE)
+    torch.save({'config': config_to_dict(config), 'tensors': {}}, path)
+    with pytest.raises(ValueError):
+        restore_adapter(torch.nn.Linear(2, 2), path)
+
+
+@pytest.mark.parametrize('damage', ['missing', 'shape'])
+def test_incompatible_tensors_leave_model_unchanged(damage, tiny_causal_lm, tmp_path):
+    config = load_config(BASE)
+    tiny_causal_lm.config._name_or_path = config.model_name
+    tiny_causal_lm.config._commit_hash = config.model_revision
+    adapted = copy.deepcopy(tiny_causal_lm)
+    inject_adapters(adapted, config.method, config.adapter)
+    path = tmp_path / 'bad.pt'
+    save_adapter(adapted, config, path)
+    checkpoint = torch.load(path, weights_only=True)
+    key = next(iter(checkpoint['tensors']))
+    if damage == 'missing':
+        del checkpoint['tensors'][key]
+    else:
+        checkpoint['tensors'][key] = torch.zeros(1)
+    torch.save(checkpoint, path)
+    modules = dict(tiny_causal_lm.named_modules())
+    parameters = dict(tiny_causal_lm.named_parameters())
+    values = {name: parameter.detach().clone() for name, parameter in parameters.items()}
+    flags = {name: parameter.requires_grad for name, parameter in parameters.items()}
+    with pytest.raises(ValueError):
+        restore_adapter(tiny_causal_lm, path)
+    assert dict(tiny_causal_lm.named_modules()) == modules
+    for name, parameter in tiny_causal_lm.named_parameters():
+        assert parameter is parameters[name]
+        assert parameter.requires_grad == flags[name]
+        torch.testing.assert_close(parameter, values[name])

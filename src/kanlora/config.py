@@ -54,14 +54,6 @@ class ExperimentConfig:
         if self.method not in METHODS:
             raise ValueError(f"method={self.method!r}: допустимы {', '.join(METHODS)}")
 
-    @property
-    def run_id(self) -> str:
-        """Имя прогона, различающее все ячейки матрицы экспериментов.
-
-        У базовой модели без адаптера оптимизатора нет: обучения не было.
-        """
-        return f"{self.method}-{self.dataset}-seed{self.seed}"
-
 
 def load_config(path: Path) -> ExperimentConfig:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
