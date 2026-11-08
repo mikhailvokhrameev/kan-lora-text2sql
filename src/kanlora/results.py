@@ -9,6 +9,8 @@ Execution Accuracy на PAUQ может оказаться неизмеримо�
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from kanlora.config import ExperimentConfig, config_to_dict
@@ -25,13 +27,15 @@ def build_result_card(
     injection: dict,
     train_report: TrainReport | None,
     metrics: dict,
-    data_files: dict[str, str | None] | None = None,
-    model_revision: str | None = None,
+    *, run_id: str, provenance: dict, artifacts: dict[str, str],
 ) -> dict:
     """Собирает карточку прогона; поля обучения равны null без обучения."""
     trained = train_report is not None
     return {
-        "run_id": config.run_id,
+        "schema_version": 2,
+        "run_id": run_id,
+        "provenance": provenance,
+        "artifacts": artifacts,
         "method": config.method,
         "dataset": config.dataset,
         "seed": config.seed,
@@ -41,8 +45,6 @@ def build_result_card(
         "git_commit": git_commit(),
         # Версии данных и модели (лекции 1 и 3 MLOps): хэши файлов набора и
         # коммит репозитория модели на Hugging Face; null — неизвестно.
-        "data_files": data_files,
-        "model_revision": model_revision,
         "metrics": metrics,
         "peak_memory_bytes": train_report.peak_memory_bytes if trained else None,
         "train_seconds": train_report.seconds if trained else None,
@@ -57,11 +59,18 @@ def build_result_card(
 
 
 def write_result_card(card: dict, directory: Path) -> Path:
+    """Публикует карточку атомарно и не заменяет существующую."""
     directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-
-    path = directory / f"{card['run_id']}.json"
-    path.write_text(
-        json.dumps(card, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    path = directory / "card.json"
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(card, stream, ensure_ascii=False, indent=2, sort_keys=True)
+            stream.write("\n")
+        os.link(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return path

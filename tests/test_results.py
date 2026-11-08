@@ -24,6 +24,7 @@ BASE = Path(__file__).parents[1] / "configs" / "base.yaml"
 @pytest.fixture
 def card() -> dict:
     return build_result_card(
+        run_id="test", provenance={}, artifacts={},
         config=load_config(BASE),
         injection={"trainable_parameters": 1234, "total_parameters": 500000,
                    "replaced": ["model.layers.0.self_attn.q_proj"]},
@@ -66,6 +67,7 @@ def test_git_commit_is_recorded(card: dict) -> None:
 def test_absent_execution_accuracy_is_null_not_zero() -> None:
     """Отличие «не мерили» от «ноль» принципиально: PAUQ может остаться без баз данных."""
     card = build_result_card(
+        run_id="test", provenance={}, artifacts={},
         config=load_config(BASE), injection={"trainable_parameters": 1, "total_parameters": 2,
                                              "replaced": []},
         train_report=TrainReport(), metrics={"exact_match": 0.1, "execution_accuracy": None},
@@ -85,7 +87,7 @@ def test_card_carries_step_losses(card: dict, tmp_path: Path) -> None:
 def test_written_card_is_valid_json_named_by_run(card: dict, tmp_path: Path) -> None:
     path = write_result_card(card, tmp_path)
 
-    assert path.name == f"{card['run_id']}.json"
+    assert path.name == "card.json"
     assert json.loads(path.read_text(encoding="utf-8")) == card
 
 
@@ -101,6 +103,7 @@ def test_baseline_card_leaves_training_fields_null() -> None:
     обучения, оптимизатора и сеточных величин нет — null, а не ноль."""
     config = apply_overrides(load_config(BASE), method="none")
     card = build_result_card(
+        run_id="test", provenance={}, artifacts={},
         config=config,
         injection={"trainable_parameters": None, "total_parameters": 500000, "replaced": []},
         train_report=None,
@@ -108,7 +111,7 @@ def test_baseline_card_leaves_training_fields_null() -> None:
     )
 
     assert card["method"] == "none"
-    assert card["run_id"] == "none-spider-seed0"
+    assert card["run_id"] == "test"
     assert card["optimizer"] is None
     assert card["total_parameters"] == 500000
     for field in (
@@ -132,21 +135,18 @@ def test_file_hashes_are_sha256_keyed_by_file_name(tmp_path: Path) -> None:
     assert file_hashes(tmp_path, ["train.json"])["train.json"] != hashes["train.json"]
 
 
-def test_card_records_data_and_model_versions() -> None:
-    card = build_result_card(
-        config=load_config(BASE),
-        injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
-        train_report=TrainReport(),
-        metrics={"exact_match": 0.1, "execution_accuracy": None},
-        data_files={"train_spider.json": "abc"},
-        model_revision="0123abcd",
-    )
-    assert card["data_files"] == {"train_spider.json": "abc"}
-    assert card["model_revision"] == "0123abcd"
+def test_card_records_provenance_and_artifacts(card):
+    assert card["schema_version"] == 2
+    assert card["provenance"] == {}
+    assert card["artifacts"] == {}
 
 
-
-
+def test_card_cannot_be_overwritten(card, tmp_path):
+    path = write_result_card(card, tmp_path)
+    original = path.read_bytes()
+    with pytest.raises(FileExistsError):
+        write_result_card({"changed": True}, tmp_path)
+    assert path.read_bytes() == original
 
 
 def test_card_has_no_removed_research_fields(card: dict) -> None:

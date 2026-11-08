@@ -24,7 +24,8 @@ METRICS = ("exact_match", "execution_accuracy")
 def load_cards(directory: Path) -> list[dict]:
     return [
         json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(Path(directory).glob("*.json"))
+        for path in sorted([*Path(directory).glob("*.json"),
+                            *Path(directory).glob("*/*/card.json")])
     ]
 
 

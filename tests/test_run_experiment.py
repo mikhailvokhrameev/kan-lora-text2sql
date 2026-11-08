@@ -162,6 +162,7 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
         def fail_late(*args):
             raise module.EvaluationDataError('db: база недоступна')
         monkeypatch.setattr(module, 'execution_accuracy', fail_late)
+    monkeypatch.setattr(module, 'save_adapter', lambda *args: None)
     monkeypatch.setattr(module, 'write_result_card', lambda card, _: seen.setdefault('card', card))
     assert module.main() == 0
     assert seen['card']['metrics']['execution_accuracy'] is None
@@ -214,3 +215,52 @@ def test_incomplete_database_blocks_final_before_training(module, tmp_path, monk
     monkeypatch.setattr(module, 'load_model_and_tokenizer', lambda *_: pytest.fail('model loaded'))
     with pytest.raises(RuntimeError, match='bad'):
         module.main()
+
+
+@pytest.mark.parametrize('method, failure', [('none', None), ('lora', 'predictions'), ('lora', 'adapter')])
+def test_artifact_publication(module, tmp_path, monkeypatch, method, failure):
+    import dataclasses
+    import json
+    import sqlite3
+    from types import SimpleNamespace
+
+    from kanlora.data.spider import SPIDER_LAYOUT
+
+    root = tmp_path / 'spider'
+    root.mkdir()
+    example = [{'db_id': 'db', 'question': 'q', 'query': 'SELECT 1'}]
+    for filename in (SPIDER_LAYOUT.train_file, SPIDER_LAYOUT.eval_file):
+        (root / filename).write_text(json.dumps(example))
+    (root / SPIDER_LAYOUT.tables_file).write_text('[]')
+    db = root / 'database' / 'db'
+    db.mkdir(parents=True)
+    sqlite3.connect(db / 'db.sqlite').close()
+    config = dataclasses.replace(load_config(SMOKE), data_root=str(tmp_path), method=method,
+                                 train_subset=0, validation_size=0)
+    args = SimpleNamespace(config=SMOKE, method=None, dataset=None, seed=None,
+                           train_subset=None, eval_limit=None, output=tmp_path / 'out')
+    monkeypatch.setattr(module, 'parse_arguments', lambda: args)
+    monkeypatch.setattr(module, 'load_config', lambda _: config)
+    monkeypatch.setattr(module, 'load_dataset_schemas', lambda *_: {})
+    token = SimpleNamespace(init_kwargs={'_commit_hash': config.model_revision})
+    model = SimpleNamespace(config=SimpleNamespace(_commit_hash=config.model_revision))
+    monkeypatch.setattr(module, 'load_model_and_tokenizer', lambda _: (model, token))
+    monkeypatch.setattr(module, 'adapt_and_train', lambda *args: (
+        {'trainable_parameters': None, 'total_parameters': 1, 'replaced': []}, None, None))
+    monkeypatch.setattr(module, 'build_prompts', lambda *args: ['q'])
+    monkeypatch.setattr(module, 'count_truncated_prompts', lambda *a, **k: 0)
+    monkeypatch.setattr(module, 'generate_sql', lambda *a, **k: ['SELECT 1'])
+    monkeypatch.setattr(module, 'exact_match_by_hardness', lambda *a: {'all': 1.0})
+    if failure:
+        def fail(*args):
+            raise OSError('write failed')
+        monkeypatch.setattr(module, 'write_predictions' if failure == 'predictions' else 'save_adapter', fail)
+        with pytest.raises(OSError, match='write failed'):
+            module.main()
+        assert not list((tmp_path / 'out').rglob('card.json'))
+    else:
+        assert module.main() == 0
+        card_path, = (tmp_path / 'out').rglob('card.json')
+        card = json.loads(card_path.read_text())
+        assert card['artifacts'] == {'predictions': 'predictions.jsonl'}
+        assert not (card_path.parent / 'adapter.pt').exists()

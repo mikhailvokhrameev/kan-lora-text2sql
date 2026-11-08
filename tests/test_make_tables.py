@@ -202,3 +202,13 @@ def test_aggregate_accepts_cards_that_differ_only_in_seed(module) -> None:
     aggregated = module.aggregate([first, second])
 
     assert aggregated[("lora", "spider")]["exact_match"][0] == pytest.approx(0.42)
+
+
+def test_loads_completed_nested_runs_and_ignores_incomplete(module, tmp_path):
+    complete = tmp_path / 'final' / 'run1'
+    incomplete = tmp_path / 'final' / 'run2'
+    complete.mkdir(parents=True)
+    incomplete.mkdir()
+    (complete / 'card.json').write_text(json.dumps({'run_id': 'run1'}))
+    (incomplete / 'predictions.jsonl').write_text('{}\n')
+    assert module.load_cards(tmp_path) == [{'run_id': 'run1'}]

@@ -27,6 +27,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from kanlora.adapters.inject import inject_adapters
+from kanlora.artifacts import new_run_id, reserve_run_directory, save_adapter, write_predictions
 from kanlora.config import METHODS, apply_overrides, load_config
 from kanlora.data.collate import Collator, build_dataset, build_prompts
 from kanlora.data.loaders import (
@@ -39,7 +40,7 @@ from kanlora.data.loaders import (
 from kanlora.eval.exact_match import exact_match_by_hardness
 from kanlora.eval.execution import EvaluationDataError, execution_accuracy, validate_execution_data
 from kanlora.eval.generate import count_truncated_prompts, generate_sql
-from kanlora.provenance import collect_provenance, file_hashes, require_clean_tracked_tree
+from kanlora.provenance import collect_provenance, require_clean_tracked_tree
 from kanlora.results import build_result_card, write_result_card
 from kanlora.train.loop import set_seed, train
 
@@ -137,7 +138,9 @@ def main() -> int:
         train_subset=arguments.train_subset,
         eval_limit=arguments.eval_limit,
     )
-    print(f"прогон: {config.run_id}")
+    run_id = new_run_id(config)
+    run_directory = reserve_run_directory(arguments.output, config.run_kind, run_id)
+    print(f"прогон: {run_id}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if config.run_kind == "final":
@@ -216,17 +219,14 @@ def main() -> int:
             metrics["execution_accuracy_reason"] = str(error)
 
 
-    card = build_result_card(
-        config=config,
-        injection=injection,
-        train_report=report,
-        metrics=metrics,
-        data_files=file_hashes(Path("."), [str(path) for path in paths]),
-        # transformers записывает коммит репозитория модели при загрузке с Hub.
-        model_revision=getattr(model.config, "_commit_hash", None),
-    )
-    card["provenance"] = provenance
-    path = write_result_card(card, arguments.output)
+    write_predictions(run_directory / "predictions.jsonl", indices["eval"], db_ids, gold, predicted)
+    artifacts = {"predictions": "predictions.jsonl"}
+    if config.method != "none":
+        save_adapter(model, config, run_directory / "adapter.pt")
+        artifacts["adapter"] = "adapter.pt"
+    card = build_result_card(config, injection, report, metrics, run_id=run_id,
+                             provenance=provenance, artifacts=artifacts)
+    path = write_result_card(card, run_directory)
 
     summary = (
         f"Exact Match {metrics['exact_match']:.4f}, "
