@@ -8,52 +8,16 @@ Execution Accuracy на PAUQ может оказаться неизмеримо�
 
 from __future__ import annotations
 
-import hashlib
 import json
-import platform
-import subprocess
 from pathlib import Path
 
 from kanlora.config import ExperimentConfig, config_to_dict
+from kanlora.provenance import collect_versions, file_hashes, git_commit
 from kanlora.train.loop import TrainReport
 
 __all__ = [
     "build_result_card", "collect_versions", "file_hashes", "git_commit", "write_result_card",
 ]
-
-
-def collect_versions() -> dict[str, str]:
-    import torch
-    import transformers
-
-    return {
-        "python": platform.python_version(),
-        "torch": torch.__version__,
-        "transformers": transformers.__version__,
-        "cuda": torch.version.cuda or "нет",
-    }
-
-
-def git_commit() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "неизвестен"
-
-
-def file_hashes(root: Path, names: list[str]) -> dict[str, str | None]:
-    """SHA-256 файлов набора данных — версия данных в карточке.
-
-    `git_commit` фиксирует код, но `data/` не в git: без хэша прогон нельзя
-    связать с конкретными файлами Spider/PAUQ. Отсутствующий файл — null.
-    """
-    hashes: dict[str, str | None] = {}
-    for name in names:
-        path = Path(root) / name
-        hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
-    return hashes
 
 
 def build_result_card(

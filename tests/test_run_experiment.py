@@ -71,3 +71,40 @@ def test_cli_rejects_removed_options(module, monkeypatch, option) -> None:
     with pytest.raises(SystemExit) as error:
         module.parse_arguments()
     assert error.value.code == 2
+
+
+def test_final_requires_target_gpu_and_seed_zero(module, monkeypatch):
+    config = load_config(BASE)
+    with pytest.raises(RuntimeError, match='GPU'):
+        module.validate_run(config, torch.device('cpu'), [1])
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda *_: 'NVIDIA GeForce GTX 1080 Ti')
+    monkeypatch.setattr(torch.cuda, 'get_device_capability', lambda *_: (6, 1))
+    with pytest.raises(RuntimeError, match='seed'):
+        module.validate_run(apply_overrides(config, seed=1), torch.device('cuda'), [1])
+
+
+def test_final_rejects_partial_or_empty_dev(module, monkeypatch):
+    monkeypatch.setattr(torch.cuda, 'get_device_name', lambda *_: 'NVIDIA GeForce GTX 1080 Ti')
+    monkeypatch.setattr(torch.cuda, 'get_device_capability', lambda *_: (6, 1))
+    config = load_config(BASE)
+    with pytest.raises(RuntimeError, match='dev'):
+        module.validate_run(config, torch.device('cuda'), [])
+    with pytest.raises(RuntimeError, match='dev'):
+        module.validate_run(apply_overrides(config, eval_limit=1), torch.device('cuda'), [1])
+
+
+def test_both_loaders_receive_pinned_revision(module, monkeypatch):
+    calls = []
+    class Tokenizer:
+        pad_token_id = 0
+    class Loader:
+        @staticmethod
+        def from_pretrained(name, **kwargs):
+            calls.append((name, kwargs))
+            return Tokenizer()
+    monkeypatch.setattr(module, 'AutoTokenizer', Loader)
+    monkeypatch.setattr(module, 'AutoModelForCausalLM', Loader)
+    config = load_config(SMOKE)
+    module.load_model_and_tokenizer(config)
+    assert len(calls) == 2
+    assert all(kwargs['revision'] == config.model_revision for _, kwargs in calls)

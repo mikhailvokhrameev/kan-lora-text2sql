@@ -2,6 +2,8 @@
 # а не отдельными файлами: 22 почти одинаковых файла — это 22 места, где
 # гиперпараметр может незаметно разойтись между методами.
 model_name: Qwen/Qwen2.5-Coder-0.5B-Instruct
+model_revision: ea3f2471cf1b1f0db85067f1ef93848e38e88c25
+run_kind: final
 data_root: data
 
 method: lora

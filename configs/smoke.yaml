@@ -3,6 +3,8 @@
 # 200 примерах, и для полного прогона — иначе проверенным окажется не тот
 # код, который считает результаты.
 model_name: Qwen/Qwen2.5-Coder-0.5B-Instruct
+model_revision: ea3f2471cf1b1f0db85067f1ef93848e38e88c25
+run_kind: smoke
 data_root: data
 
 method: lora

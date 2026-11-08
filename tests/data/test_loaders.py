@@ -152,3 +152,15 @@ def test_pauq_eval_split_is_read() -> None:
     examples = load_examples(PAUQ_ROOT, PAUQ_LAYOUT, "eval")
     assert len(examples) == 1
     assert examples[0].question == "Какой стадион самый большой?"
+
+
+def test_indices_match_existing_selection() -> None:
+    from kanlora.data.loaders import select_indices
+
+    examples = list(range(25))
+    for size in (3, 25, 30):
+        train, validation = select_indices(len(examples), size, 10, 7)
+        assert [examples[i] for i in train] == subsample(examples, size, 7)
+        assert [examples[i] for i in validation] == validation_subsample(examples, size, 10, 7)
+        assert not set(train) & set(validation)
+        assert train == sorted(train) and validation == sorted(validation)

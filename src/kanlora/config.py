@@ -27,6 +27,8 @@ METHODS = ("none", "lora", "dora", "kan_lora")
 @dataclass(frozen=True)
 class ExperimentConfig:
     model_name: str
+    model_revision: str
+    run_kind: str
     data_root: str
     method: str
     dataset: str
@@ -44,6 +46,11 @@ class ExperimentConfig:
     optimizer: OptimizerConfig
 
     def __post_init__(self) -> None:
+        import re
+        if not re.fullmatch(r"[0-9a-f]{40}", self.model_revision):
+            raise ValueError("model_revision должен быть полным SHA коммита")
+        if self.run_kind not in ("smoke", "pilot", "final"):
+            raise ValueError("неизвестный run_kind")
         if self.method not in METHODS:
             raise ValueError(f"method={self.method!r}: допустимы {', '.join(METHODS)}")
 
@@ -60,6 +67,8 @@ def load_config(path: Path) -> ExperimentConfig:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return ExperimentConfig(
         model_name=raw["model_name"],
+        model_revision=raw["model_revision"],
+        run_kind=raw["run_kind"],
         data_root=raw["data_root"],
         method=raw["method"],
         dataset=raw["dataset"],

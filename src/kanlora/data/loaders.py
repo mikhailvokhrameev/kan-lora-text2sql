@@ -85,32 +85,27 @@ def subsample(examples: list[Text2SqlExample], size: int, seed: int) -> list[Tex
     одной и той же для всех трёх методов и всех трёх зёрен обучения, иначе
     разница между методами частично объяснялась бы разными данными.
     """
-    if size >= len(examples):
-        return list(examples)
-
-    indices = sorted(random.Random(seed).sample(range(len(examples)), size))
+    indices, _ = select_indices(len(examples), size, 0, seed)
     return [examples[index] for index in indices]
+
+
+def select_indices(total: int, train_size: int, validation_size: int, seed: int) -> tuple[list[int], list[int]]:
+    if train_size >= total:
+        return list(range(total)), []
+    train = sorted(random.Random(seed).sample(range(total), train_size))
+    taken = set(train)
+    remaining = [index for index in range(total) if index not in taken]
+    if validation_size < len(remaining):
+        remaining = sorted(random.Random(seed).sample(remaining, validation_size))
+    return train, remaining
 
 
 def validation_subsample(
     examples: list[Text2SqlExample], train_size: int, size: int, seed: int
 ) -> list[Text2SqlExample]:
-    """Валидационная выборка из train, не пересекающаяся с обучающей подвыборкой.
-
-    Обучающие индексы восстанавливаются тем же вызовом с тем же зерном, что
-    и в `subsample`, поэтому обучающая подвыборка не меняется от того, есть
-    валидация или нет. Из оставшихся примеров берётся `size` штук тем же
-    зерном; если их меньше — берутся все оставшиеся. Отдельной валидационной
-    выборки нет: dev служит тестовой, и подбирать что-либо по ней нельзя.
-    """
-    if train_size >= len(examples):
-        return []
-
-    taken = set(random.Random(seed).sample(range(len(examples)), train_size))
-    remaining = [index for index in range(len(examples)) if index not in taken]
-    if size < len(remaining):
-        remaining = sorted(random.Random(seed).sample(remaining, size))
-    return [examples[index] for index in remaining]
+    """Выбирает валидацию из оставшихся примеров train."""
+    _, indices = select_indices(len(examples), train_size, size, seed)
+    return [examples[index] for index in indices]
 
 
 LAYOUTS: dict[str, DatasetLayout] = {"spider": SPIDER_LAYOUT, "pauq": PAUQ_LAYOUT}

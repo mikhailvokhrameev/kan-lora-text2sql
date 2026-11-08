@@ -31,15 +31,16 @@ from kanlora.config import METHODS, apply_overrides, load_config
 from kanlora.data.collate import Collator, build_dataset, build_prompts
 from kanlora.data.loaders import (
     LAYOUTS,
+    database_path,
     load_dataset_schemas,
     load_examples,
-    subsample,
-    validation_subsample,
+    select_indices,
 )
 from kanlora.eval.exact_match import exact_match_by_hardness
 from kanlora.eval.execution import count_available_databases, execution_accuracy
 from kanlora.eval.generate import count_truncated_prompts, generate_sql
-from kanlora.results import build_result_card, file_hashes, write_result_card
+from kanlora.provenance import collect_provenance, file_hashes, require_clean_tracked_tree
+from kanlora.results import build_result_card, write_result_card
 from kanlora.train.loop import set_seed, train
 
 
@@ -105,6 +106,27 @@ def adapt_and_train(
     return injection_info, report, truncated
 
 
+def validate_run(config, device, eval_examples):
+    if config.run_kind != "final":
+        return
+    if device.type != "cuda" or "GTX 1080 Ti" not in torch.cuda.get_device_name(device) or torch.cuda.get_device_capability(device) != (6, 1):
+        raise RuntimeError("final требует целевую GPU GTX 1080 Ti")
+    if config.seed != 0:
+        raise RuntimeError("final требует seed 0")
+    if config.eval_limit is not None or not eval_examples:
+        raise RuntimeError("final требует полный непустой dev")
+
+
+def load_model_and_tokenizer(config):
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name, revision=config.model_revision)
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        config.model_name, revision=config.model_revision, dtype=torch.float32
+    )
+    return model, tokenizer
+
+
 def main() -> int:
     arguments = parse_arguments()
     config = apply_overrides(
@@ -118,6 +140,8 @@ def main() -> int:
     print(f"прогон: {config.run_id}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if config.run_kind == "final":
+        require_clean_tracked_tree()
     set_seed(config.seed)
 
     root = Path(config.data_root) / config.dataset
@@ -125,23 +149,28 @@ def main() -> int:
     schemas = load_dataset_schemas(root, layout)
 
     train_examples, validation_examples = [], []
+    indices = {"train": [], "validation": [], "eval": []}
+    paths = [root / layout.eval_file, root / layout.tables_file]
     if config.method != "none":
         all_train = load_examples(root, layout, "train")
-        train_examples = subsample(all_train, config.train_subset, config.subsample_seed)
-        validation_examples = validation_subsample(
-            all_train, config.train_subset, config.validation_size, config.subsample_seed
+        train_indices, validation_indices = select_indices(
+            len(all_train), config.train_subset, config.validation_size, config.subsample_seed
         )
+        indices["train"], indices["validation"] = train_indices, validation_indices
+        train_examples = [all_train[i] for i in train_indices]
+        validation_examples = [all_train[i] for i in validation_indices]
+        paths.append(root / layout.train_file)
     eval_examples = load_examples(root, layout, "eval")
+    validate_run(config, device, eval_examples)
     if config.eval_limit is not None:
         eval_examples = eval_examples[: config.eval_limit]
+    indices["eval"] = list(range(len(eval_examples)))
+    paths.extend(database_path(root, layout, db_id) for db_id in sorted({e.db_id for e in eval_examples}))
 
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    # fp32 явно и одинаково для всех трёх методов: сравнение по видеопамяти
-    # осмысленно только при одинаковой точности.
-    model = AutoModelForCausalLM.from_pretrained(config.model_name, dtype=torch.float32)
+    model, tokenizer = load_model_and_tokenizer(config)
+    model_revision = getattr(model.config, "_commit_hash", None)
+    tokenizer_revision = tokenizer.init_kwargs.get("_commit_hash")
+    provenance = collect_provenance(config, device, indices, paths, model_revision, tokenizer_revision)
     injection, report, truncated = adapt_and_train(
         config, model, tokenizer, train_examples, schemas, device, validation_examples
     )
@@ -194,10 +223,11 @@ def main() -> int:
         injection=injection,
         train_report=report,
         metrics=metrics,
-        data_files=file_hashes(root, [layout.train_file, layout.eval_file, layout.tables_file]),
+        data_files=file_hashes(Path("."), [str(path) for path in paths]),
         # transformers записывает коммит репозитория модели при загрузке с Hub.
         model_revision=getattr(model.config, "_commit_hash", None),
     )
+    card["provenance"] = provenance
     path = write_result_card(card, arguments.output)
 
     summary = (
