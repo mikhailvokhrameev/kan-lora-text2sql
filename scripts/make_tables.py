@@ -1,214 +1,135 @@
-"""Сборка таблиц и графиков из карточек результатов.
-
-Таблицы собираются одной командой и руками не правятся: правка руками
-означала бы, что число в работе не восстанавливается из карточек.
-
-Рядом со средним всегда стоит размах по зёрнам. Различие между методами по
-Exact Match ожидается порядка одного-двух процентов, то есть внутри разброса
-по случайному зерну, и выводы формулируются только по различиям, выходящим
-за него. Таблица с одним средним скрывала бы ровно это.
-
-Запуск: python scripts/make_tables.py [--results results] [--output results]
-"""
-
+"""Итоговая таблица из завершённых сопоставимых карточек версии 2."""
 from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 
-METRICS = ("exact_match", "execution_accuracy")
+METHODS = ("none", "lora", "dora", "kan_lora")
 
 
 def load_cards(directory: Path) -> list[dict]:
-    return [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted([*Path(directory).glob("*.json"),
-                            *Path(directory).glob("*/*/card.json")])
-    ]
+    directory = Path(directory)
+    cards = []
+    for path in sorted(directory.glob("*.json")):
+        raise ValueError(f"{path}: устаревший JSON; выберите каталог v2 одного run_kind")
+    for path in sorted(directory.glob("*/card.json")):
+        card = json.loads(path.read_text(encoding="utf-8"))
+        if card.get("schema_version") != 2:
+            raise ValueError(f"{path}: требуется schema_version=2; выберите каталог v2")
+        artifacts = card.get("artifacts", {})
+        required = {"predictions"} | ({"adapter"} if card.get("method") != "none" else set())
+        for name in sorted(required | artifacts.keys(), reverse=True):
+            value = artifacts.get(name)
+            if not isinstance(value, str) or Path(value).is_absolute() or ".." in Path(value).parts or not (path.parent / value).is_file():
+                raise ValueError(f"{path}: отсутствует или недопустим артефакт {name}")
+        cards.append(card)
+    return cards
 
 
-CellKey = tuple[str, str]
-
-# Базовая модель без адаптера (`method: none`): обучения не было, оптимизатора
-# и масштаба входа у неё нет.
-BASELINE = "none"
-BASELINE_LABEL = "без адаптера (базовый уровень)"
-
-def cell_key(card: dict) -> CellKey:
-    """Группирует карточки по методу и набору данных."""
-    return card["method"], card["dataset"]
-
-
-def _flatten(section: dict, prefix: str = "") -> dict[str, object]:
-    """Вложенная конфигурация в плоский словарь с путями вида `train.epochs`."""
-    flat: dict[str, object] = {}
-    for name, value in section.items():
-        path = f"{prefix}{name}"
-        if isinstance(value, dict):
-            flat.update(_flatten(value, f"{path}."))
+def _flatten(value: dict, prefix: str = "") -> dict:
+    result = {}
+    for key, item in value.items():
+        name = f"{prefix}.{key}" if prefix else key
+        if isinstance(item, dict):
+            result.update(_flatten(item, name))
         else:
-            flat[path] = value
-    return flat
+            result[name] = item
+    return result
 
 
-def _comparable_config(card: dict) -> dict[str, object] | None:
-    """Конфигурация карточки без зерна и без полей, которые её ячейку не различают.
+def _conditions(card: dict, baseline_pair: bool, kan_pair: bool) -> dict:
+    config = dict(card["config"])
+    config.pop("method", None)
+    if baseline_pair:
+        for key in ("adapter", "train", "optimizer", "train_subset", "validation_size", "subsample_seed"):
+            config.pop(key, None)
+    elif not kan_pair:
+        adapter = dict(config.get("adapter", {}))
+        for key in ("grid_size", "spline_order", "learn_input_scale"):
+            adapter.pop(key, None)
+        config["adapter"] = adapter
+    provenance = dict(card["provenance"])
+    provenance.pop("config", None)  # Сравнивается выше с исключениями baseline.
+    if baseline_pair:
+        indices = dict(provenance.get("indices", {}))
+        indices.pop("train", None)
+        indices.pop("validation", None)
+        provenance["indices"] = indices
+        # У baseline нет хэша train; общие файлы сверяются отдельно ниже.
+        provenance.pop("file_hashes", None)
+    return _flatten({"config": config, "provenance": provenance,
+                     "versions": card["versions"], "git_commit": card["git_commit"]})
 
-    Масштаб входа у LoRA/DoRA не используется, у базовой модели нет ни
-    оптимизатора, ни адаптера. Карточка без конфигурации сравнению не подлежит.
-    """
-    config = card.get("config")
-    if not config:
-        return None
-    flat = _flatten(config)
-    flat.pop("seed", None)
-    if card["method"] != "kan_lora":
-        flat.pop("adapter.learn_input_scale", None)
-    if card["method"] == BASELINE:
-        flat = {name: value for name, value in flat.items() if not name.startswith(("adapter.", "optimizer."))}
-    return flat
 
-
-def _check_comparable(key: CellKey, cards: list[dict]) -> None:
-    """Бросает ValueError, если карточки одной ячейки получены в разных условиях.
-
-    Имена файлов смок-прогона и полного прогона совпадают, и без этой проверки
-    ячейка молча усреднила бы 50 примеров смока с полной отложенной выборкой.
-    Различаться могут только зёрна.
-    """
-    reference_card = None
-    reference_config = None
+def validate_comparability(cards: list[dict]) -> None:
+    if not cards:
+        raise ValueError("нет карточек для итоговой таблицы")
+    cells = set()
+    kinds = set()
     for card in cards:
-        config = _comparable_config(card)
-        if config is None:
-            continue
-        if reference_config is None:
-            reference_card, reference_config = card, config
-            continue
-        differing = sorted(
-            name
-            for name in reference_config.keys() | config.keys()
-            if reference_config.get(name) != config.get(name)
-        )
-        if differing:
-            raise ValueError(
-                f"ячейка {key}: карточки {reference_card['run_id']} и {card['run_id']} "
-                f"различаются полями конфигурации {', '.join(differing)}; "
-                "их нельзя усреднять, уберите лишние карточки из каталога результатов"
-            )
+        if card.get("schema_version") != 2:
+            raise ValueError("требуется schema_version=2; выберите каталог v2")
+        key = (card["dataset"], card["method"], card["seed"])
+        if key in cells:
+            raise ValueError(f"повтор ячейки {key}")
+        cells.add(key)
+        if card["method"] not in METHODS:
+            raise ValueError(f"неизвестный method: {card['method']}")
+        kinds.add(card["config"]["run_kind"])
+    if len(kinds) != 1:
+        raise ValueError("смешаны run_kind")
+    for index, first in enumerate(cards):
+        for second in cards[index + 1:]:
+            if first["dataset"] != second["dataset"]:
+                continue
+            baseline_pair = "none" in (first["method"], second["method"])
+            kan_pair = first["method"] == second["method"] == "kan_lora"
+            left = _conditions(first, baseline_pair, kan_pair)
+            right = _conditions(second, baseline_pair, kan_pair)
+            if baseline_pair:
+                hashes1 = first["provenance"].get("file_hashes", {})
+                hashes2 = second["provenance"].get("file_hashes", {})
+                baseline_hashes = hashes1 if first["method"] == "none" else hashes2
+                for name in baseline_hashes:
+                    left[f"provenance.file_hashes.{name}"] = hashes1.get(name)
+                    right[f"provenance.file_hashes.{name}"] = hashes2.get(name)
+            missing = object()
+            differing = sorted(key for key in left.keys() | right.keys() if left.get(key, missing) != right.get(key, missing))
+            if differing:
+                raise ValueError(f"{first['run_id']} и {second['run_id']}: различаются {', '.join(differing)}")
 
 
-def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
-    """Среднее и размах по зёрнам для каждой ячейки «метод, набор».
-
-    Размах, а не стандартное отклонение: при трёх зёрнах отклонение оценивается
-    плохо, а размах говорит ровно то, что нужно, — насколько далеко разъезжаются
-    прогоны одного метода.
-
-    Карточки одной ячейки обязаны различаться только зерном (`_check_comparable`).
-    """
-    buckets: dict[CellKey, dict[str, list[float | None]]] = defaultdict(
-        lambda: defaultdict(list)
-    )
-    members: dict[CellKey, list[dict]] = defaultdict(list)
-    for card in cards:
-        config = card.get("config") or {}
-        optimizer = card.get("optimizer") or (config.get("optimizer") or {}).get("name")
-        if card["method"] != BASELINE and optimizer not in (None, "adamw"):
-            raise ValueError(f"неподдерживаемый оптимизатор {optimizer} в {card['run_id']}")
-        if card["method"] == "kan_lora" and (config.get("adapter") or {}).get("learn_input_scale") is False:
-            raise ValueError(f"неподдерживаемая конфигурация learn_input_scale в {card['run_id']}")
-        key = cell_key(card)
-        members[key].append(card)
-        for metric in METRICS:
-            buckets[key][metric].append(card["metrics"].get(metric))
-        buckets[key]["peak_memory_bytes"].append(card.get("peak_memory_bytes"))
-        buckets[key]["trainable_parameters"].append(card.get("trainable_parameters"))
-
-    aggregated: dict[CellKey, dict] = {}
-    for key, metrics in buckets.items():
-        _check_comparable(key, members[key])
-        summary: dict[str, tuple[float, float] | None] = {}
-        for name, values in metrics.items():
-            present = [value for value in values if value is not None]
-            # «Не мерили» не усредняется с нулём: PAUQ может остаться без баз.
-            summary[name] = (
-                (sum(present) / len(present), max(present) - min(present)) if present else None
-            )
-        aggregated[key] = summary
-    return aggregated
-
-
-def _cell(value: tuple[float, float] | None, digits: int = 4) -> str:
-    if value is None:
-        return "не измерялась"
-    mean, spread = value
-    return f"{mean:.{digits}f} ± {spread / 2:.{digits}f}"
-
-
-def _row_order(key: CellKey) -> tuple:
-    """Базовый уровень — первыми строками, затем методы в прежнем порядке."""
-    method, dataset = key
-    return (method != BASELINE, method, dataset)
+def _metric(card: dict, name: str) -> str:
+    value = card["metrics"].get(name)
+    return "не измерялась" if value is None else f"{value:.4f}"
 
 
 def main_table(cards: list[dict]) -> str:
-    """Основная матрица; строки базового уровня собираются из карточек `method: none`.
-
-    Пока такой карточки нет, на месте базового уровня стоит строка «нет прогона»:
-    без этой точки таблица не говорит, дало ли дообучение что-то вообще.
-    """
-    aggregated = aggregate(cards)
-    lines = [
-        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров |",
-        "|---|---|---|---|---|---|---|",
-    ]
-    if not any(key[0] == BASELINE for key in aggregated):
-        lines.append(f"| {BASELINE_LABEL} | — | — | нет прогона | нет прогона | — | — |")
-    for key in sorted(aggregated, key=_row_order):
-        method, dataset = key
-        summary = aggregated[key]
-        if method == BASELINE:
-            label = BASELINE_LABEL
+    validate_comparability(cards)
+    lines = ["| Набор | Метод | Seed | Exact Match | Execution Accuracy | Обучаемых параметров | Пик памяти обучения, ГиБ |",
+             "|---|---|---|---|---|---|---|"]
+    for card in sorted(cards, key=lambda c: (c["dataset"], METHODS.index(c["method"]), c["seed"])):
+        if card["method"] == "none":
+            parameters = memory = "не применимо"
         else:
-            label = method
-        memory = summary["peak_memory_bytes"]
-        parameters = summary["trainable_parameters"]
-        # У базового уровня обучения не было: пика видеопамяти обучения и
-        # обучаемых параметров нет (null в карточке), в таблице — прочерк.
-        memory_cell = f"{memory[0] / 2**30:.2f}" if memory is not None else "—"
-        parameters_cell = f"{int(parameters[0])}" if parameters is not None else "—"
-        lines.append(
-            f"| {label} | {'—' if method == BASELINE else 'adamw'} | {dataset} "
-            f"| {_cell(summary['exact_match'])} | {_cell(summary['execution_accuracy'])} "
-            f"| {memory_cell} | {parameters_cell} |"
-        )
+            parameters = str(card["trainable_parameters"])
+            peak = card["peak_memory_bytes"]
+            memory = f"{peak / 2**30:.2f}" if peak else "не измерялась"
+        lines.append(f"| {card['dataset']} | {card['method']} | {card['seed']} | {_metric(card, 'exact_match')} | {_metric(card, 'execution_accuracy')} | {parameters} | {memory} |")
     return "\n".join(lines)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Сборка таблиц и графиков из карточек")
-    parser.add_argument("--results", type=Path, default=Path("results"))
-    parser.add_argument("--output", type=Path, default=Path("results"))
+    parser = argparse.ArgumentParser(description="Итоговая таблица карточек v2")
+    parser.add_argument("--results", type=Path, default=Path("results/v2/final"))
+    parser.add_argument("--output", type=Path, default=Path("results/v2/tables"))
     arguments = parser.parse_args()
-
-    cards = load_cards(arguments.results)
-    if not cards:
-        print(f"карточек не найдено в {arguments.results}")
-        return 1
-
-    tables = arguments.output / "tables.md"
-    tables.parent.mkdir(parents=True, exist_ok=True)
-    tables.write_text(
-        "# Результаты\n\n## Основная матрица\n\n"
-        + main_table(cards)
-        + "\n",
-        encoding="utf-8",
-    )
-
-    print(f"собрано карточек: {len(cards)}; таблицы: {tables}")
+    table = main_table(load_cards(arguments.results))
+    arguments.output.mkdir(parents=True, exist_ok=True)
+    output = arguments.output / "main.md"
+    output.write_text("# Результаты\n\n" + table + "\n", encoding="utf-8")
+    print(f"таблица: {output}")
     return 0
 
 
