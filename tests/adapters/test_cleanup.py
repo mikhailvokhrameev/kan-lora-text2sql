@@ -9,6 +9,7 @@ from torch import nn
 
 from kanlora.adapters.base import AdapterConfig
 from kanlora.adapters.dora import DoRALinear
+from kanlora.adapters.inject import adapter_modules, inject_adapters
 from kanlora.adapters.kan_lora import KANLoRALinear
 from kanlora.adapters.lora import LoRALinear
 from kanlora.data.spider import SPIDER_LAYOUT
@@ -40,13 +41,34 @@ def test_cleanup_preserves_adapter_outputs_and_gradients(cls, output, gradients)
 
 
 def test_cleanup_preserves_predictions_and_metrics(tiny_causal_lm, tiny_tokenizer, tmp_path: Path) -> None:
-    predictions = generate_sql(tiny_causal_lm, tiny_tokenizer, ["SELECT", "FROM"], device=torch.device("cpu"), batch_size=2, max_new_tokens=4, max_length=64)
-    assert predictions == ["\x14\x14\x14\x14", ""]
+    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
+    with torch.no_grad():
+        for _, adapter in adapter_modules(tiny_causal_lm):
+            adapter.lora_b.fill_(1.0)
+
+    predictions = generate_sql(
+        tiny_causal_lm, tiny_tokenizer, ["SELECT", "FROM", "WHERE"],
+        device=torch.device("cpu"), batch_size=3, max_new_tokens=4, max_length=64,
+    )
+    # Эталоны получены на исходном коде d13f4a3. При нулевой B первый и
+    # третий ответы отличаются — генерация действительно зависит от адаптера.
+    assert predictions == ["$", "", "$$$\x14"]
+    with torch.no_grad():
+        for _, adapter in adapter_modules(tiny_causal_lm):
+            adapter.lora_b.zero_()
+    baseline = generate_sql(
+        tiny_causal_lm, tiny_tokenizer, ["SELECT", "FROM", "WHERE"],
+        device=torch.device("cpu"), batch_size=3, max_new_tokens=4, max_length=64,
+    )
+    assert baseline == ["\x14\x14\x14\x14", "", "\x05\x05\x05\x05"]
+    assert predictions != baseline
+
     path = tmp_path / "database" / "concert_singer"
     path.mkdir(parents=True)
     with sqlite3.connect(path / "concert_singer.sqlite") as connection:
-        connection.execute("CREATE TABLE singer (name TEXT)")
+        connection.executescript("CREATE TABLE singer (name TEXT); INSERT INTO singer VALUES ('Alice');")
     gold = ["SELECT count(*) FROM singer"] * 2
+    sql_predictions = ["SELECT count(*) FROM singer", "SELECT name FROM singer"]
     tables = Path(__file__).parents[1] / "data" / "fixtures" / "spider_mini" / "tables.json"
-    assert exact_match(gold, predictions, ["concert_singer"] * 2, tables) == 0.0
-    assert execution_accuracy(gold, predictions, ["concert_singer"] * 2, tmp_path, SPIDER_LAYOUT) == 0.0
+    assert exact_match(gold, sql_predictions, ["concert_singer"] * 2, tables) == 0.5
+    assert execution_accuracy(gold, sql_predictions, ["concert_singer"] * 2, tmp_path, SPIDER_LAYOUT) == 0.5
