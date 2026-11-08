@@ -5,8 +5,7 @@
 в эталонном запросе — без него порядок в SQL не определён, и требовать его
 означало бы занижать метрику по случайному признаку.
 
-Любая ошибка исполнения считается промахом, а не аварией: модель регулярно
-выдаёт неисполнимый текст, и это нормальная часть измерения.
+Ошибка предсказания считается промахом; ошибка эталона или базы — ошибкой данных.
 """
 
 from __future__ import annotations
@@ -20,15 +19,21 @@ from pathlib import Path
 from kanlora.data.loaders import DatasetLayout, database_path
 
 __all__ = [
+    "EvaluationDataError",
     "ExecutionOutcome",
     "count_available_databases",
     "execute_query",
     "execution_accuracy",
     "results_match",
+    "validate_execution_data",
 ]
 
 # Как часто (в инструкциях виртуальной машины sqlite) проверяется дедлайн.
 _PROGRESS_STEP = 1000
+
+
+class EvaluationDataError(RuntimeError):
+    """Данные не позволяют достоверно вычислить Execution Accuracy."""
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,19 @@ def results_match(
     return sorted(map(repr, gold.rows)) == sorted(map(repr, predicted.rows))
 
 
+def validate_execution_data(
+    gold: list[str], db_ids: list[str], root: Path, layout: DatasetLayout
+) -> None:
+    if len(gold) != len(db_ids):
+        raise ValueError("длины эталонов и баз не совпадают")
+    for query, db_id in zip(gold, db_ids, strict=True):
+        database = database_path(root, layout, db_id)
+        if not database.is_file():
+            raise EvaluationDataError(f"{db_id}: файл базы отсутствует: {database}")
+        if execute_query(database, query).failed:
+            raise EvaluationDataError(f"{db_id}: ошибка исполнения эталона или чтения базы: {database}")
+
+
 def execution_accuracy(
     gold: list[str],
     predicted: list[str],
@@ -107,9 +125,12 @@ def execution_accuracy(
     for gold_query, predicted_query, db_id in zip(gold, predicted, db_ids, strict=True):
         database = database_path(root, layout, db_id)
         order_matters = "order by" in gold_query.lower()
+        gold_result = execute_query(database, gold_query)
+        if gold_result.failed:
+            raise EvaluationDataError(f"{db_id}: ошибка исполнения эталона или чтения базы: {database}")
         matched += int(
             results_match(
-                execute_query(database, gold_query),
+                gold_result,
                 execute_query(database, predicted_query),
                 order_matters,
             )

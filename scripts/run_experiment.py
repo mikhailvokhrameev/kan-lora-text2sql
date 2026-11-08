@@ -37,7 +37,7 @@ from kanlora.data.loaders import (
     select_indices,
 )
 from kanlora.eval.exact_match import exact_match_by_hardness
-from kanlora.eval.execution import count_available_databases, execution_accuracy
+from kanlora.eval.execution import EvaluationDataError, execution_accuracy, validate_execution_data
 from kanlora.eval.generate import count_truncated_prompts, generate_sql
 from kanlora.provenance import collect_provenance, file_hashes, require_clean_tracked_tree
 from kanlora.results import build_result_card, write_result_card
@@ -167,6 +167,16 @@ def main() -> int:
     indices["eval"] = list(range(len(eval_examples)))
     paths.extend(database_path(root, layout, db_id) for db_id in sorted({e.db_id for e in eval_examples}))
 
+    gold = [example.query for example in eval_examples]
+    db_ids = [example.db_id for example in eval_examples]
+    execution_reason = None
+    try:
+        validate_execution_data(gold, db_ids, root, layout)
+    except EvaluationDataError as error:
+        if config.run_kind != "smoke":
+            raise
+        execution_reason = str(error)
+
     model, tokenizer = load_model_and_tokenizer(config)
     model_revision = getattr(model.config, "_commit_hash", None)
     tokenizer_revision = tokenizer.init_kwargs.get("_commit_hash")
@@ -186,37 +196,25 @@ def main() -> int:
         device=device, batch_size=config.eval_batch_size,
         max_new_tokens=config.max_new_tokens, max_length=config.max_length,
     )
-    gold = [example.query for example in eval_examples]
-    db_ids = [example.db_id for example in eval_examples]
-
     hardness = exact_match_by_hardness(gold, predicted, db_ids, root / layout.tables_file)
     metrics = {
         "exact_match": hardness["all"],
         "exact_match_by_hardness": hardness,
         "execution_accuracy": None,
+        "execution_accuracy_reason": execution_reason,
         "truncated_prompts": truncated,
         "eval_truncated_prompts": eval_truncated,
         "evaluated": len(gold),
     }
 
-    # Execution Accuracy требует файлов баз. Их отсутствие — заранее оговорённое
-    # отступление, а не сбой: метрика остаётся null, и это видно в карточке.
-    # Проверяются все уникальные db_id отложенной выборки, а не только первый:
-    # набор ссылается на много разных баз, и первая ничего не говорит про
-    # остальные.
-    unique_db_ids = set(db_ids)
-    available = count_available_databases(root, layout, unique_db_ids)
-    if available == 0:
-        print("файлы баз данных не найдены: Execution Accuracy не считается")
-    else:
-        if available < len(unique_db_ids):
-            print(
-                f"внимание: не найдено баз данных: {len(unique_db_ids) - available} из "
-                f"{len(unique_db_ids)} — Execution Accuracy посчитана частично"
-            )
-        metrics["execution_accuracy"] = execution_accuracy(
-            gold, predicted, db_ids, root, layout
-        )
+    if execution_reason is None:
+        try:
+            metrics["execution_accuracy"] = execution_accuracy(gold, predicted, db_ids, root, layout)
+        except EvaluationDataError as error:
+            if config.run_kind != "smoke":
+                raise
+            metrics["execution_accuracy_reason"] = str(error)
+
 
     card = build_result_card(
         config=config,

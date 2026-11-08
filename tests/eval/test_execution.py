@@ -133,3 +133,29 @@ def test_count_available_databases_counts_present_files_only(root: Path) -> None
 
 def test_count_available_databases_is_zero_when_none_found(tmp_path: Path) -> None:
     assert count_available_databases(tmp_path, SPIDER_LAYOUT, ["missing_db"]) == 0
+
+
+def test_gold_error_is_data_error(root: Path) -> None:
+    from kanlora.eval.execution import EvaluationDataError
+
+    with pytest.raises(EvaluationDataError, match='shop'):
+        execution_accuracy(['SELECT * FROM absent'], ['SELECT 1'], [DB], root, SPIDER_LAYOUT)
+
+
+def test_invalid_prediction_is_model_miss(root: Path) -> None:
+    assert execution_accuracy(['SELECT 1'], ['SELECT FROM'], [DB], root, SPIDER_LAYOUT) == 0.0
+
+
+def test_complete_data_preserves_execution_accuracy(root: Path) -> None:
+    assert execution_accuracy(['SELECT 1', 'SELECT 2'], ['SELECT 1', 'SELECT 3'],
+                              [DB, DB], root, SPIDER_LAYOUT) == 0.5
+
+
+def test_pauq_uses_own_root_and_layout(root: Path, tmp_path: Path) -> None:
+    from kanlora.data.pauq import PAUQ_LAYOUT
+    from kanlora.eval.execution import EvaluationDataError, validate_execution_data
+
+    pauq_root = tmp_path / 'pauq'
+    with pytest.raises(EvaluationDataError, match=DB):
+        validate_execution_data(['SELECT 1'], [DB], pauq_root, PAUQ_LAYOUT)
+    assert execution_accuracy(['SELECT 1'], ['SELECT 1'], [DB], root, PAUQ_LAYOUT) == 1.0

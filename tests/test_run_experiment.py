@@ -114,6 +114,7 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     import dataclasses
     import hashlib
     import json
+    import sqlite3
     from types import SimpleNamespace
 
     from kanlora.data.spider import SPIDER_LAYOUT
@@ -127,6 +128,11 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     (root / SPIDER_LAYOUT.train_file).write_text(json.dumps(train))
     (root / SPIDER_LAYOUT.eval_file).write_text(json.dumps(dev))
     (root / SPIDER_LAYOUT.tables_file).write_text('[]')
+    db_path = root / 'database' / 'db'
+    db_path.mkdir(parents=True)
+    sqlite3.connect(db_path / 'db.sqlite').close()
+    dev[1]['db_id'] = 'missing'
+    (root / SPIDER_LAYOUT.eval_file).write_text(json.dumps(dev))
     config = dataclasses.replace(load_config(SMOKE), data_root=str(tmp_path), train_subset=3,
                                  validation_size=2, eval_limit=2)
     args = SimpleNamespace(config=SMOKE, method=None, dataset=None, seed=None,
@@ -150,9 +156,10 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     monkeypatch.setattr(module, 'count_truncated_prompts', lambda *a, **k: 0)
     monkeypatch.setattr(module, 'generate_sql', lambda *a, **k: ['SELECT 0', 'SELECT 1'])
     monkeypatch.setattr(module, 'exact_match_by_hardness', lambda *a: {'all': 1.0})
-    monkeypatch.setattr(module, 'count_available_databases', lambda *a: 0)
     monkeypatch.setattr(module, 'write_result_card', lambda card, _: seen.setdefault('card', card))
     assert module.main() == 0
+    assert seen['card']['metrics']['execution_accuracy'] is None
+    assert seen['card']['metrics']['execution_accuracy_reason']
     provenance = seen['card']['provenance']
     for split in ('train', 'validation'):
         assert [train[i]['question'] for i in provenance['indices'][split]] == [
@@ -165,3 +172,39 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     assert provenance['file_hashes'][str(root / SPIDER_LAYOUT.train_file)] == hashlib.sha256(
         (root / SPIDER_LAYOUT.train_file).read_bytes()
     ).hexdigest()
+
+
+@pytest.mark.parametrize('corrupt', [False, True], ids=['missing', 'corrupt'])
+def test_incomplete_database_blocks_final_before_training(module, tmp_path, monkeypatch, corrupt):
+    import dataclasses
+    import json
+    import sqlite3
+    from types import SimpleNamespace
+
+    from kanlora.data.spider import SPIDER_LAYOUT
+
+    root = tmp_path / 'spider'
+    root.mkdir()
+    dev = [{'db_id': db, 'question': 'q', 'query': 'SELECT * FROM item'}
+           for db in ('good', 'bad')]
+    (root / SPIDER_LAYOUT.eval_file).write_text(json.dumps(dev))
+    (root / SPIDER_LAYOUT.tables_file).write_text('[]')
+    for db in ('good', 'bad') if corrupt else ('good',):
+        path = root / 'database' / db
+        path.mkdir(parents=True)
+        if db == 'bad':
+            (path / f'{db}.sqlite').write_bytes(b'corrupt')
+        else:
+            with sqlite3.connect(path / f'{db}.sqlite') as con:
+                con.execute('CREATE TABLE item (id INTEGER)')
+    config = dataclasses.replace(load_config(BASE), data_root=str(tmp_path), method='none')
+    args = SimpleNamespace(config=BASE, method=None, dataset=None, seed=None,
+                           train_subset=None, eval_limit=None, output=tmp_path)
+    monkeypatch.setattr(module, 'parse_arguments', lambda: args)
+    monkeypatch.setattr(module, 'load_config', lambda _: config)
+    monkeypatch.setattr(module, 'require_clean_tracked_tree', lambda: None)
+    monkeypatch.setattr(module, 'validate_run', lambda *a: None)
+    monkeypatch.setattr(module, 'load_dataset_schemas', lambda *_: {})
+    monkeypatch.setattr(module, 'load_model_and_tokenizer', lambda *_: pytest.fail('model loaded'))
+    with pytest.raises(RuntimeError, match='bad'):
+        module.main()
