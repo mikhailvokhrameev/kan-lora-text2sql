@@ -51,11 +51,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--method", choices=METHODS, help="none — базовая модель без адаптера, только оценка"
     )
+    parser.add_argument("--run-kind", choices=["smoke", "pilot", "final"])
     parser.add_argument("--dataset", choices=["spider", "pauq"])
     parser.add_argument("--seed", type=int)
     parser.add_argument("--train-subset", type=int)
     parser.add_argument("--eval-limit", type=int)
-    parser.add_argument("--output", type=Path, default=Path("results"))
+    parser.add_argument("--output", type=Path, default=Path("results/v2"))
     return parser.parse_args()
 
 
@@ -133,6 +134,7 @@ def main() -> int:
     config = apply_overrides(
         load_config(arguments.config),
         method=arguments.method,
+        run_kind=arguments.run_kind,
         dataset=arguments.dataset,
         seed=arguments.seed,
         train_subset=arguments.train_subset,

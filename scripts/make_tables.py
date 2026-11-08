@@ -34,7 +34,8 @@ def load_cards(directory: Path) -> list[dict]:
         layout = LAYOUTS[card["dataset"]]
         expected = {str(root / layout.database_dir / item["db_id"] / (item["db_id"] + ".sqlite")) for item in predictions}
         hashes = card["provenance"]["file_hashes"]
-        if any(not hashes.get(name) for name in expected):
+        missing_allowed = _missing_ea_allowed(card)
+        if any(name not in hashes or (not hashes[name] and not missing_allowed) for name in expected):
             raise ValueError(f"{path}: отсутствует file_hashes оценочной SQLite")
         allowed.add(path)
         allowed.update(path.parent / name for name in artifacts.values())
@@ -80,11 +81,31 @@ def _conditions(card: dict, baseline_pair: bool, kan_pair: bool) -> dict:
                      "versions": card["versions"], "git_commit": card["git_commit"]})
 
 
+def _missing_ea_allowed(card: dict) -> bool:
+    metrics = card.get("metrics", {})
+    reason = metrics.get("execution_accuracy_reason")
+    return (card["config"]["run_kind"] == "smoke"
+            and metrics.get("execution_accuracy") is None
+            and isinstance(reason, str) and bool(reason.strip()))
+
+
 def _validate_card(card: dict) -> None:
     provenance = card.get("provenance", {})
     for field, length in (("evaluator_commit", 40), ("lock_sha256", 64)):
         if not re.fullmatch(rf"[0-9a-f]{{{length}}}", str(provenance.get(field, ""))):
             raise ValueError(f"{card.get('run_id')}: отсутствует или неверен provenance.{field}")
+    device = provenance.get("device", "")
+    if device != "cpu" and not re.fullmatch(r"cuda(?::[0-9]+)?", device):
+        raise ValueError("неверен provenance.device")
+    name = provenance.get("gpu_name")
+    capability = provenance.get("compute_capability")
+    if "gpu_name" not in provenance or (device.startswith("cuda") and not isinstance(name, str)) or (not device.startswith("cuda") and name is not None):
+        raise ValueError("неверен provenance.gpu_name")
+    if "compute_capability" not in provenance or (device.startswith("cuda") and (not isinstance(capability, list) or len(capability) != 2 or not all(type(x) is int and x >= 0 for x in capability))) or (not device.startswith("cuda") and capability is not None):
+        raise ValueError("неверен provenance.compute_capability")
+    metrics = card.get("metrics", {})
+    if metrics.get("execution_accuracy") is None and not _missing_ea_allowed(card):
+        raise ValueError("отсутствует Execution Accuracy или причина smoke")
     dataset = card["dataset"]
     layout = LAYOUTS[dataset]
     root = Path(card["config"]["data_root"]) / dataset
@@ -93,7 +114,7 @@ def _validate_card(card: dict) -> None:
     db_root = root / layout.database_dir
     databases = [name for name in hashes if Path(name).parent.parent == db_root
                  and Path(name).name == Path(name).parent.name + ".sqlite"]
-    if not databases or any(not hashes.get(name) for name in required + databases):
+    if not databases or any(not hashes.get(name) for name in required) or (not _missing_ea_allowed(card) and any(not hashes.get(name) for name in databases)):
         raise ValueError(f"{card.get('run_id')}: отсутствует file_hashes оценочных данных или SQLite")
 
 

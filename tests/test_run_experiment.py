@@ -110,8 +110,8 @@ def test_both_loaders_receive_pinned_revision(module, monkeypatch):
     assert all(kwargs['revision'] == config.model_revision for _, kwargs in calls)
 
 
-@pytest.mark.parametrize('late_error', [False, True])
-def test_run_provenance_indices_reference_original_json(module, tmp_path, monkeypatch, late_error):
+@pytest.mark.parametrize('kind,late_error', [('smoke', False), ('smoke', True), ('pilot', True)])
+def test_run_provenance_indices_reference_original_json(module, tmp_path, monkeypatch, kind, late_error):
     import dataclasses
     import hashlib
     import json
@@ -136,9 +136,9 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
         dev[1]['db_id'] = 'missing'
     (root / SPIDER_LAYOUT.eval_file).write_text(json.dumps(dev))
     config = dataclasses.replace(load_config(SMOKE), data_root=str(tmp_path), train_subset=3,
-                                 validation_size=2, eval_limit=2)
+                                 validation_size=2, eval_limit=2, run_kind=kind)
     args = SimpleNamespace(config=SMOKE, method=None, dataset=None, seed=None,
-                           train_subset=None, eval_limit=None, output=tmp_path)
+                           train_subset=None, eval_limit=None, run_kind=None, output=tmp_path)
     monkeypatch.setattr(module, 'parse_arguments', lambda: args)
     monkeypatch.setattr(module, 'load_config', lambda _: config)
     monkeypatch.setattr(module, 'load_dataset_schemas', lambda *_: {})
@@ -164,6 +164,11 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
         monkeypatch.setattr(module, 'execution_accuracy', fail_late)
     monkeypatch.setattr(module, 'save_adapter', lambda *args: None)
     monkeypatch.setattr(module, 'write_result_card', lambda card, _: seen.setdefault('card', card))
+    if kind == 'pilot':
+        with pytest.raises(module.EvaluationDataError, match='база недоступна'):
+            module.main()
+        assert 'card' not in seen
+        return
     assert module.main() == 0
     assert seen['card']['metrics']['execution_accuracy'] is None
     assert seen['card']['metrics']['execution_accuracy_reason']
@@ -181,8 +186,9 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     ).hexdigest()
 
 
+@pytest.mark.parametrize('kind', ['pilot', 'final'])
 @pytest.mark.parametrize('corrupt', [False, True], ids=['missing', 'corrupt'])
-def test_incomplete_database_blocks_final_before_training(module, tmp_path, monkeypatch, corrupt):
+def test_incomplete_database_blocks_final_before_training(module, tmp_path, monkeypatch, corrupt, kind):
     import dataclasses
     import json
     import sqlite3
@@ -204,9 +210,9 @@ def test_incomplete_database_blocks_final_before_training(module, tmp_path, monk
         else:
             with sqlite3.connect(path / f'{db}.sqlite') as con:
                 con.execute('CREATE TABLE item (id INTEGER)')
-    config = dataclasses.replace(load_config(BASE), data_root=str(tmp_path), method='none')
+    config = dataclasses.replace(load_config(BASE), data_root=str(tmp_path), method='none', run_kind=kind)
     args = SimpleNamespace(config=BASE, method=None, dataset=None, seed=None,
-                           train_subset=None, eval_limit=None, output=tmp_path)
+                           train_subset=None, eval_limit=None, run_kind=None, output=tmp_path)
     monkeypatch.setattr(module, 'parse_arguments', lambda: args)
     monkeypatch.setattr(module, 'load_config', lambda _: config)
     monkeypatch.setattr(module, 'require_clean_tracked_tree', lambda: None)
@@ -238,7 +244,7 @@ def test_artifact_publication(module, tmp_path, monkeypatch, method, failure):
     config = dataclasses.replace(load_config(SMOKE), data_root=str(tmp_path), method=method,
                                  train_subset=0, validation_size=0)
     args = SimpleNamespace(config=SMOKE, method=None, dataset=None, seed=None,
-                           train_subset=None, eval_limit=None, output=tmp_path / 'out')
+                           train_subset=None, eval_limit=None, run_kind=None, output=tmp_path / 'out')
     monkeypatch.setattr(module, 'parse_arguments', lambda: args)
     monkeypatch.setattr(module, 'load_config', lambda _: config)
     monkeypatch.setattr(module, 'load_dataset_schemas', lambda *_: {})
@@ -264,3 +270,13 @@ def test_artifact_publication(module, tmp_path, monkeypatch, method, failure):
         card = json.loads(card_path.read_text())
         assert card['artifacts'] == {'predictions': 'predictions.jsonl'}
         assert not (card_path.parent / 'adapter.pt').exists()
+
+
+def test_run_kind_cli_override_and_default_output(module, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["run_experiment.py", "--run-kind", "pilot"])
+    args = module.parse_arguments()
+    assert args.output == Path("results/v2")
+    assert apply_overrides(load_config(BASE), run_kind=args.run_kind).run_kind == "pilot"
+    monkeypatch.setattr(sys, "argv", ["run_experiment.py", "--run-kind", "bad"])
+    with pytest.raises(SystemExit):
+        module.parse_arguments()

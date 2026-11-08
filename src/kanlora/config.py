@@ -82,6 +82,7 @@ def apply_overrides(
     config: ExperimentConfig,
     *,
     method: str | None = None,
+    run_kind: str | None = None,
     dataset: str | None = None,
     seed: int | None = None,
     train_subset: int | None = None,
@@ -89,6 +90,8 @@ def apply_overrides(
 ) -> ExperimentConfig:
     """Накладывает ключи командной строки. None означает «не трогать»."""
     updated = config
+    if run_kind is not None:
+        updated = replace(updated, run_kind=run_kind)
     if method is not None:
         updated = replace(updated, method=method)
     if dataset is not None:

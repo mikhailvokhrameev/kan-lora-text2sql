@@ -74,6 +74,8 @@ def collect_provenance(config, device, indices, paths, model_revision, tokenizer
         "indices": indices, "file_hashes": file_hashes(Path("."), [str(p) for p in paths]),
         "model_revision": model_revision, "tokenizer_revision": tokenizer_revision,
         "device": str(device),
+        "gpu_name": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+        "compute_capability": list(torch.cuda.get_device_capability(device)) if device.type == "cuda" else None,
         "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
         "cudnn_deterministic": torch.backends.cudnn.deterministic,
         "cudnn_benchmark": torch.backends.cudnn.benchmark,

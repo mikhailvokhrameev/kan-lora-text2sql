@@ -151,3 +151,19 @@ def test_card_cannot_be_overwritten(card, tmp_path):
 
 def test_card_has_no_removed_research_fields(card: dict) -> None:
     assert not {"optimizer_coverage", "fraction_inside_grid", "spline_stats", "latency"} & card.keys()
+
+
+def test_provenance_records_gpu_identity(monkeypatch):
+    import torch
+
+    from kanlora.provenance import collect_provenance
+
+    config = load_config(BASE)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _: "GTX 1080 Ti")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _: (6, 1))
+    args = (config, torch.device("cuda"), {}, [], config.model_revision, config.model_revision)
+    provenance = collect_provenance(*args)
+    assert provenance["gpu_name"] == "GTX 1080 Ti"
+    assert provenance["compute_capability"] == [6, 1]
+    cpu = collect_provenance(config, torch.device("cpu"), {}, [], config.model_revision, config.model_revision)
+    assert cpu["gpu_name"] is None and cpu["compute_capability"] is None

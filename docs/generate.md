@@ -206,8 +206,7 @@ from_pretrained` требует сети.
 64. Одну строку он кодирует в словарь `{"input_ids": list[int]}`, как
 настоящий токенизатор при `tokenizer(text, add_special_tokens=False)` (так
 кодирует промпты `truncate_prompt`), список строк — в дополненный пакет
-`transformers.BatchEncoding` (так кодирует промпт замер задержки,
-`docs/latency.md`); умеет пакетно декодировать и строить промпт шаблоном
+`transformers.BatchEncoding`; умеет пакетно декодировать и строить промпт шаблоном
 ChatML (`apply_chat_template`), как `FakeTokenizer` в
 `tests/data/test_collate.py` (`docs/collate.md`).
 
@@ -260,13 +259,8 @@ ChatML (`apply_chat_template`), как `FakeTokenizer` в
   зависели бы от технической настройки `batch_size`, не имеющей отношения к
   сравниваемым методам.
 
-## Не реализовано
+## Смежные модули
 
-`generate_sql` спроектирован так, что подходит и для оценки, и для замера
-задержки: возвращает обычный список нормализованных строк SQL в порядке
-промптов, без привязки к конкретной метрике. Официальная метрика Exact
-Match, Execution Accuracy, мера выученной нелинейности, конфигурация и
-карточка результата прогона и замер задержки генерации со слиянием
-адаптера и без реализованы — см. [`exact_match.md`](exact_match.md),
-[`execution.md`](execution.md), [`nonlinearity.md`](nonlinearity.md),
-[`experiment-runner.md`](experiment-runner.md), [`latency.md`](latency.md).
+Результат генерации используется для [Exact Match](exact_match.md) и
+[Execution Accuracy](execution.md); конфигурация и карточка описаны в
+[experiment-runner.md](experiment-runner.md).

@@ -149,3 +149,15 @@ def test_dataset_accepts_schemas_for_all_train_and_dev_examples(module, tmp_path
 
     checks = module.check_dataset("spider", root)
     assert all(check.ok for check in checks), checks
+
+
+def test_compatible_pascal_binary_and_successful_kernel(module, monkeypatch):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _: "GTX 1080 Ti")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _: (6, 1))
+    monkeypatch.setattr(torch.cuda, "get_arch_list", lambda: ["sm_60"])
+    monkeypatch.setattr(torch, "ones", lambda *a, **k: torch.tensor([1.0], requires_grad=True))
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda: None)
+    assert all(check.ok for check in module.check_cuda())

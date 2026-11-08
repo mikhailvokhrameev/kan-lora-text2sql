@@ -50,10 +50,16 @@ def check_cuda() -> list[Check]:
         capability = torch.cuda.get_device_capability(0)
         supported = torch.cuda.get_arch_list()
         arch = f"sm_{capability[0]}{capability[1]}"
+        compatible = any(
+            item.startswith("sm_") and item[3:].isdigit()
+            and int(item[3:]) // 10 == capability[0]
+            and int(item[3:]) % 10 <= capability[1]
+            for item in supported
+        )
         checks = [
             Check("CUDA", True, f"CUDA {torch.version.cuda}, {name}, {arch}"),
-            Check(f"поддержка {arch} в сборке", arch in supported,
-                  f"сборка умеет: {', '.join(supported)}"),
+            Check(f"поддержка {arch} в сборке", compatible,
+                  f"совместимый бинарный код среди: {', '.join(supported)}"),
         ]
         value = torch.ones(2, device="cuda", dtype=torch.float32, requires_grad=True)
         (value * value).sum().backward()

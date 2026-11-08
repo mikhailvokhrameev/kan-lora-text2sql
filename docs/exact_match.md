@@ -173,10 +173,8 @@ def exact_match(
 ## Смежные модули
 
 Execution Accuracy реализована отдельно — см. [`execution.md`](execution.md);
-мера выученной нелинейности — см. [`nonlinearity.md`](nonlinearity.md);
 конфигурация и карточка результата прогона — см.
-[`experiment-runner.md`](experiment-runner.md); замер задержки генерации
-со слиянием адаптера и без — см. [`latency.md`](latency.md).
+[`experiment-runner.md`](experiment-runner.md).
 
 В текущем evaluator значения условий и `DISTINCT` отключены (`DISABLE_VALUE` и
 `DISABLE_DISTINCT`); метрика не является строковым равенством.

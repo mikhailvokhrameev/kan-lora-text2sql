@@ -21,7 +21,7 @@ def card(method="lora", dataset="spider"):
         "provenance": {"indices": {"train": [1], "validation": [2], "eval": [0]},
                        "file_hashes": {f"data/{dataset}/{'dev.json' if dataset == 'spider' else 'pauq_dev.json'}": "b", f"data/{dataset}/tables.json": "c", f"data/{dataset}/database/db/db.sqlite": "d"},
                        "model_revision": "abc", "tokenizer_revision": "abc",
-                       "device": "cuda", "evaluator": "v1", "evaluator_commit": "a" * 40, "lock_sha256": "b" * 64, "versions": {"torch": "1"}},
+                       "device": "cuda", "gpu_name": "GTX 1080 Ti", "compute_capability": [6, 1], "evaluator": "v1", "evaluator_commit": "a" * 40, "lock_sha256": "b" * 64, "versions": {"torch": "1"}},
         "versions": {"torch": "1"}, "git_commit": "abc",
         "artifacts": {"predictions": "predictions.jsonl", **({"adapter": "adapter.pt"} if method != "none" else {})},
         "metrics": {"exact_match": 0.4, "execution_accuracy": 0.5},
@@ -170,3 +170,36 @@ def test_provenance_identity_mismatch_is_rejected(field, length):
     second['provenance'][field] = 'c' * length
     with pytest.raises(ValueError, match=field):
         module.validate_comparability([first, second])
+
+
+def test_smoke_missing_sqlite_with_reason_loads(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    item = card("none")
+    item["config"]["run_kind"] = "smoke"
+    item["metrics"].update(execution_accuracy=None, execution_accuracy_reason="missing database")
+    item["provenance"]["file_hashes"]["data/spider/database/db/db.sqlite"] = None
+    (run / "card.json").write_text(json.dumps(item))
+    (run / "predictions.jsonl").write_text(json.dumps({"index": 0, "db_id": "db"}) + "\n")
+    assert module.load_cards(tmp_path) == [item]
+    assert "не измерялась" in module.main_table([item])
+
+
+@pytest.mark.parametrize("kind,reason", [("final", "missing"), ("pilot", "missing"), ("smoke", None)])
+def test_missing_ea_requires_smoke_and_reason(kind, reason):
+    item = card("none")
+    item["config"]["run_kind"] = kind
+    item["metrics"].update(execution_accuracy=None, execution_accuracy_reason=reason)
+    with pytest.raises(ValueError):
+        module.validate_comparability([item])
+
+
+def test_gpu_identity_is_required_and_compared():
+    first, second = card(), card("dora")
+    first["provenance"].update(gpu_name="GTX 1080 Ti", compute_capability=[6, 1])
+    second["provenance"].update(gpu_name="other", compute_capability=[6, 1])
+    with pytest.raises(ValueError, match="gpu_name"):
+        module.validate_comparability([first, second])
+    first["provenance"].pop("gpu_name")
+    with pytest.raises(ValueError, match="gpu_name"):
+        module.validate_comparability([first])
