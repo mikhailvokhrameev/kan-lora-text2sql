@@ -54,3 +54,18 @@ def test_smoke_records_dirty_state(tmp_path, monkeypatch):
     assert result['tracked_tree_dirty'] is True
     with pytest.raises(RuntimeError, match='Ревизии'):
         collect_provenance(config, torch.device('cpu'), {}, [], config.model_revision, 'main')
+
+
+def test_staged_change_with_worktree_restored_is_dirty(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(['git', 'init', '-q'], check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@example.com'], check=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], check=True)
+    Path('tracked').write_text('original')
+    subprocess.run(['git', 'add', 'tracked'], check=True)
+    subprocess.run(['git', 'commit', '-qm', 'initial'], check=True)
+    Path('tracked').write_text('staged')
+    subprocess.run(['git', 'add', 'tracked'], check=True)
+    Path('tracked').write_text('original')
+    with pytest.raises(RuntimeError):
+        require_clean_tracked_tree()

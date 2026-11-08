@@ -108,3 +108,60 @@ def test_both_loaders_receive_pinned_revision(module, monkeypatch):
     module.load_model_and_tokenizer(config)
     assert len(calls) == 2
     assert all(kwargs['revision'] == config.model_revision for _, kwargs in calls)
+
+
+def test_run_provenance_indices_reference_original_json(module, tmp_path, monkeypatch):
+    import dataclasses
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    from kanlora.data.spider import SPIDER_LAYOUT
+
+    root = tmp_path / 'spider'
+    root.mkdir()
+    train = [{'db_id': 'db', 'question': f'question {i}', 'query': f'SELECT {i}'}
+             for i in range(8)]
+    dev = [{'db_id': 'db', 'question': f'dev {i}', 'query': f'SELECT {i}'}
+           for i in range(3)]
+    (root / SPIDER_LAYOUT.train_file).write_text(json.dumps(train))
+    (root / SPIDER_LAYOUT.eval_file).write_text(json.dumps(dev))
+    (root / SPIDER_LAYOUT.tables_file).write_text('[]')
+    config = dataclasses.replace(load_config(SMOKE), data_root=str(tmp_path), train_subset=3,
+                                 validation_size=2, eval_limit=2)
+    args = SimpleNamespace(config=SMOKE, method=None, dataset=None, seed=None,
+                           train_subset=None, eval_limit=None, output=tmp_path)
+    monkeypatch.setattr(module, 'parse_arguments', lambda: args)
+    monkeypatch.setattr(module, 'load_config', lambda _: config)
+    monkeypatch.setattr(module, 'load_dataset_schemas', lambda *_: {})
+    token = SimpleNamespace(init_kwargs={'_commit_hash': config.model_revision})
+    model = SimpleNamespace(config=SimpleNamespace(_commit_hash=config.model_revision))
+    monkeypatch.setattr(module, 'load_model_and_tokenizer', lambda _: (model, token))
+    seen = {}
+    def train_stub(_config, _model, _token, training, _schemas, _device, validation):
+        seen['train'] = training
+        seen['validation'] = validation
+        return {'trainable_parameters': 1, 'total_parameters': 1, 'replaced': []}, None, 0
+    monkeypatch.setattr(module, 'adapt_and_train', train_stub)
+    def prompts_stub(examples, *_):
+        seen['eval'] = examples
+        return [e.question for e in examples]
+    monkeypatch.setattr(module, 'build_prompts', prompts_stub)
+    monkeypatch.setattr(module, 'count_truncated_prompts', lambda *a, **k: 0)
+    monkeypatch.setattr(module, 'generate_sql', lambda *a, **k: ['SELECT 0', 'SELECT 1'])
+    monkeypatch.setattr(module, 'exact_match_by_hardness', lambda *a: {'all': 1.0})
+    monkeypatch.setattr(module, 'count_available_databases', lambda *a: 0)
+    monkeypatch.setattr(module, 'write_result_card', lambda card, _: seen.setdefault('card', card))
+    assert module.main() == 0
+    provenance = seen['card']['provenance']
+    for split in ('train', 'validation'):
+        assert [train[i]['question'] for i in provenance['indices'][split]] == [
+            e.question for e in seen[split]
+        ]
+    assert provenance['indices']['eval'] == [0, 1]
+    assert [dev[i]['question'] for i in provenance['indices']['eval']] == [
+        e.question for e in seen['eval']
+    ]
+    assert provenance['file_hashes'][str(root / SPIDER_LAYOUT.train_file)] == hashlib.sha256(
+        (root / SPIDER_LAYOUT.train_file).read_bytes()
+    ).hexdigest()

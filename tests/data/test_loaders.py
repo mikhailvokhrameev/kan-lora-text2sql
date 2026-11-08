@@ -158,9 +158,18 @@ def test_indices_match_existing_selection() -> None:
     from kanlora.data.loaders import select_indices
 
     examples = list(range(25))
-    for size in (3, 25, 30):
+    import random
+
+    for size in (3, 20, 25, 30):
         train, validation = select_indices(len(examples), size, 10, 7)
-        assert [examples[i] for i in train] == subsample(examples, size, 7)
-        assert [examples[i] for i in validation] == validation_subsample(examples, size, 10, 7)
+        expected_train = (sorted(random.Random(7).sample(range(25), size))
+                          if size < 25 else list(range(25)))
+        remaining = [i for i in range(25) if i not in expected_train]
+        expected_validation = (sorted(random.Random(7).sample(remaining, 10))
+                               if len(remaining) > 10 else remaining)
+        assert train == expected_train
+        assert validation == expected_validation
+        assert subsample(examples, size, 7) == expected_train
+        assert validation_subsample(examples, size, 10, 7) == expected_validation
         assert not set(train) & set(validation)
         assert train == sorted(train) and validation == sorted(validation)

@@ -101,3 +101,23 @@ def test_baseline_run_id_does_not_name_an_optimizer(config: ExperimentConfig) ->
 def test_unknown_method_is_rejected(config: ExperimentConfig) -> None:
     with pytest.raises(ValueError, match="method"):
         apply_overrides(config, method="qlora")
+
+
+@pytest.mark.parametrize('field', ['model_revision', 'run_kind'])
+def test_provenance_fields_are_required_in_yaml(tmp_path, field):
+    raw = yaml.safe_load(BASE.read_text())
+    del raw[field]
+    path = tmp_path / 'config.yaml'
+    path.write_text(yaml.safe_dump(raw))
+    with pytest.raises(KeyError, match=field):
+        load_config(path)
+
+
+def test_revision_and_run_kind_are_validated(config):
+    with pytest.raises(ValueError, match='model_revision'):
+        dataclasses.replace(config, model_revision='main')
+    with pytest.raises(ValueError, match='run_kind'):
+        dataclasses.replace(config, run_kind='unknown')
+    smoke = load_config(BASE.parent / 'smoke.yaml')
+    assert smoke.model_revision == config.model_revision
+    assert (config.run_kind, smoke.run_kind) == ('final', 'smoke')

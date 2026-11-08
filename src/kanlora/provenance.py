@@ -45,7 +45,13 @@ def file_hashes(root: Path, names: list[str]) -> dict[str, str | None]:
 
 def tracked_tree_dirty() -> bool:
     try:
-        return subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], check=False).returncode != 0
+        return any(
+            subprocess.run(command, check=False).returncode != 0
+            for command in (
+                ["git", "diff", "--quiet", "--cached", "HEAD", "--"],
+                ["git", "diff", "--quiet", "--"],
+            )
+        )
     except OSError:
         return True
 
