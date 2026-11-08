@@ -110,7 +110,8 @@ def test_both_loaders_receive_pinned_revision(module, monkeypatch):
     assert all(kwargs['revision'] == config.model_revision for _, kwargs in calls)
 
 
-def test_run_provenance_indices_reference_original_json(module, tmp_path, monkeypatch):
+@pytest.mark.parametrize('late_error', [False, True])
+def test_run_provenance_indices_reference_original_json(module, tmp_path, monkeypatch, late_error):
     import dataclasses
     import hashlib
     import json
@@ -131,7 +132,8 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     db_path = root / 'database' / 'db'
     db_path.mkdir(parents=True)
     sqlite3.connect(db_path / 'db.sqlite').close()
-    dev[1]['db_id'] = 'missing'
+    if not late_error:
+        dev[1]['db_id'] = 'missing'
     (root / SPIDER_LAYOUT.eval_file).write_text(json.dumps(dev))
     config = dataclasses.replace(load_config(SMOKE), data_root=str(tmp_path), train_subset=3,
                                  validation_size=2, eval_limit=2)
@@ -156,6 +158,10 @@ def test_run_provenance_indices_reference_original_json(module, tmp_path, monkey
     monkeypatch.setattr(module, 'count_truncated_prompts', lambda *a, **k: 0)
     monkeypatch.setattr(module, 'generate_sql', lambda *a, **k: ['SELECT 0', 'SELECT 1'])
     monkeypatch.setattr(module, 'exact_match_by_hardness', lambda *a: {'all': 1.0})
+    if late_error:
+        def fail_late(*args):
+            raise module.EvaluationDataError('db: база недоступна')
+        monkeypatch.setattr(module, 'execution_accuracy', fail_late)
     monkeypatch.setattr(module, 'write_result_card', lambda card, _: seen.setdefault('card', card))
     assert module.main() == 0
     assert seen['card']['metrics']['execution_accuracy'] is None

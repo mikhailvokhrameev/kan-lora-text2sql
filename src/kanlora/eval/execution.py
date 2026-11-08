@@ -40,11 +40,12 @@ class EvaluationDataError(RuntimeError):
 class ExecutionOutcome:
     rows: list[tuple] | None
     failed: bool
+    data_error: bool = False
 
 
 def execute_query(db_path: Path, query: str, timeout: float = 30.0) -> ExecutionOutcome:
     if not Path(db_path).is_file():
-        return ExecutionOutcome(None, True)
+        return ExecutionOutcome(None, True, data_error=True)
 
     connection = None
     try:
@@ -62,7 +63,18 @@ def execute_query(db_path: Path, query: str, timeout: float = 30.0) -> Execution
             lambda: 1 if time.monotonic() > deadline else 0, _PROGRESS_STEP
         )
         return ExecutionOutcome(connection.execute(query).fetchall(), False)
-    except Exception:  # noqa: BLE001 — любая ошибка исполнения предсказанного запроса — промах
+    except sqlite3.Error as error:
+        # SQLite сообщает основной код в младшем байте расширенного кода.
+        # Ошибки SQL модели (включая READONLY и INTERRUPT) остаются промахом.
+        code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+        data_error = code in {
+            sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB,
+            sqlite3.SQLITE_IOERR, sqlite3.SQLITE_PERM, sqlite3.SQLITE_BUSY,
+        }
+        return ExecutionOutcome(None, True, data_error=data_error)
+    except OSError:
+        return ExecutionOutcome(None, True, data_error=True)
+    except Exception:  # noqa: BLE001 — некорректный запрос модели считается промахом
         return ExecutionOutcome(None, True)
     finally:
         if connection is not None:
@@ -128,11 +140,8 @@ def execution_accuracy(
         gold_result = execute_query(database, gold_query)
         if gold_result.failed:
             raise EvaluationDataError(f"{db_id}: ошибка исполнения эталона или чтения базы: {database}")
-        matched += int(
-            results_match(
-                gold_result,
-                execute_query(database, predicted_query),
-                order_matters,
-            )
-        )
+        predicted_result = execute_query(database, predicted_query)
+        if predicted_result.data_error:
+            raise EvaluationDataError(f"{db_id}: ошибка чтения базы: {database}")
+        matched += int(results_match(gold_result, predicted_result, order_matters))
     return matched / len(gold)

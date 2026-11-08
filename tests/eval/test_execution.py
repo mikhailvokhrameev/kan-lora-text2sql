@@ -159,3 +159,23 @@ def test_pauq_uses_own_root_and_layout(root: Path, tmp_path: Path) -> None:
     with pytest.raises(EvaluationDataError, match=DB):
         validate_execution_data(['SELECT 1'], [DB], pauq_root, PAUQ_LAYOUT)
     assert execution_accuracy(['SELECT 1'], ['SELECT 1'], [DB], root, PAUQ_LAYOUT) == 1.0
+
+
+def test_database_disappearing_after_gold_is_data_error(root: Path, monkeypatch) -> None:
+    from kanlora.eval import execution
+
+    real_execute = execution.execute_query
+    calls = 0
+
+    def remove_after_gold(path, query, timeout=30.0):
+        nonlocal calls
+        outcome = real_execute(path, query, timeout)
+        calls += 1
+        if calls == 1:
+            path.unlink()
+        return outcome
+
+    monkeypatch.setattr(execution, 'execute_query', remove_after_gold)
+    with pytest.raises(RuntimeError, match=DB):
+        execution.execution_accuracy(['SELECT * FROM item'], ['SELECT * FROM item'],
+                                     [DB], root, SPIDER_LAYOUT)
