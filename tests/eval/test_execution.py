@@ -187,3 +187,22 @@ def test_prediction_attach_missing_database_is_model_miss(root: Path) -> None:
         ["ATTACH DATABASE '/nonexistent/unknown.sqlite' AS other"],
         [DB], root, SPIDER_LAYOUT,
     ) == 0.0
+
+
+def test_transient_database_error_during_prediction_is_data_error(root: Path, monkeypatch) -> None:
+    from kanlora.eval import execution
+
+    real_execute = execution.execute_query
+    calls = 0
+
+    def transient_failure(path, query, timeout=30.0):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return execution.ExecutionOutcome(None, True, data_error=True)
+        return real_execute(path, query, timeout)
+
+    monkeypatch.setattr(execution, 'execute_query', transient_failure)
+    with pytest.raises(execution.EvaluationDataError, match=DB):
+        execution.execution_accuracy(['SELECT * FROM item'], ['SELECT * FROM item'],
+                                     [DB], root, SPIDER_LAYOUT)

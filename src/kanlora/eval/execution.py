@@ -51,6 +51,13 @@ def execute_query(db_path: Path, query: str, timeout: float = 30.0) -> Execution
     try:
         connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout)
         connection.text_factory = lambda value: value.decode("utf-8", errors="replace")
+        # EA выполняется на одной базе: ATTACH — не запрос к целевой базе и
+        # может выдать тот же SQLITE_CANTOPEN, что и её недоступность.
+        connection.set_authorizer(
+            lambda action, _arg1, _arg2, _db, _trigger: (
+                sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_ATTACH else sqlite3.SQLITE_OK
+            )
+        )
         # `timeout` в connect() — лишь ожидание блокировки файла, а не время
         # исполнения: декартово произведение или бесконечный рекурсивный CTE из
         # ответа модели повесили бы оценку. Поэтому тот же `timeout` служит ещё и
@@ -141,7 +148,7 @@ def execution_accuracy(
         if gold_result.failed:
             raise EvaluationDataError(f"{db_id}: ошибка исполнения эталона или чтения базы: {database}")
         predicted_result = execute_query(database, predicted_query)
-        if predicted_result.data_error and execute_query(database, gold_query).failed:
+        if predicted_result.data_error:
             raise EvaluationDataError(f"{db_id}: ошибка чтения базы: {database}")
         matched += int(results_match(gold_result, predicted_result, order_matters))
     return matched / len(gold)
