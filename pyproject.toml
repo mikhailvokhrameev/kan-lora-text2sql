@@ -4,15 +4,14 @@ version = "0.1.0"
 description = "Сравнение нелинейной низкоранговой адаптации KAN-LoRA с LoRA и DoRA в задаче генерации SQL-запросов"
 requires-python = ">=3.10"
 
-# torch>=2.14 требуется из-за torch.optim.Muon.
+# Нижняя версия проверена CPU-тестами; совместимость CUDA проверяется отдельно.
 # Внимание: на GTX 1080 Ti (Pascal, sm_61) поддержка сборкой PyTorch под CUDA
 # не гарантирована и проверяется скриптом scripts/check_environment.py.
 dependencies = [
-    "torch>=2.14",
+    "torch>=2.6",
     "transformers>=4.46",
     "datasets>=3.0",
     "accelerate>=1.0",
-    "matplotlib>=3.8",
     "pyyaml>=6.0",
     "numpy>=1.26",
     "gdown>=6.2.0",

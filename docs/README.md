@@ -20,3 +20,7 @@
 Полнота баз и исполнимость эталонов обязательны для численной EA; подробнее
 в [описании Execution Accuracy](execution.md). После изменения методики
 необходимо повторить все затронутые ячейки итоговой матрицы.
+
+Диагностика CUDA и полноты данных описана в [environment-check.md](environment-check.md);
+ограничения метрик и сравнения — в [exact_match.md](exact_match.md) и
+[execution.md](execution.md).

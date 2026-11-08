@@ -14,6 +14,9 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+from kanlora.data.loaders import LAYOUTS, load_dataset_schemas, load_examples
+from kanlora.eval.execution import validate_execution_data
+
 DATASET_FILES = {
     "spider": ("train_spider.json", "dev.json", "tables.json"),
     # Имена и раскладка проверены по факту в репозитории ai-spiderweb/pauq
@@ -42,18 +45,24 @@ def check_cuda() -> list[Check]:
     if not torch.cuda.is_available():
         return [Check("CUDA", False, "недоступна (ожидаемо на машине разработки)")]
 
-    name = torch.cuda.get_device_name(0)
-    capability = torch.cuda.get_device_capability(0)
-    supported = torch.cuda.get_arch_list()
-    arch = f"sm_{capability[0]}{capability[1]}"
-    return [
-        Check("CUDA", True, f"{name}, {arch}"),
-        Check(
-            f"поддержка {arch} в сборке",
-            arch in supported,
-            f"сборка умеет: {', '.join(supported)}",
-        ),
-    ]
+    try:
+        name = torch.cuda.get_device_name(0)
+        capability = torch.cuda.get_device_capability(0)
+        supported = torch.cuda.get_arch_list()
+        arch = f"sm_{capability[0]}{capability[1]}"
+        checks = [
+            Check("CUDA", True, f"CUDA {torch.version.cuda}, {name}, {arch}"),
+            Check(f"поддержка {arch} в сборке", arch in supported,
+                  f"сборка умеет: {', '.join(supported)}"),
+        ]
+        value = torch.ones(2, device="cuda", dtype=torch.float32, requires_grad=True)
+        (value * value).sum().backward()
+        torch.cuda.synchronize()
+        checks.append(Check("CUDA: fp32 forward/backward", True, "выполнено"))
+        return checks
+    except Exception as error:  # noqa: BLE001 — диагностика должна вывести ошибку
+        return [Check("CUDA", False, f"ошибка CUDA: {error}")]
+
 
 
 def check_nltk_punkt() -> Check:
@@ -82,14 +91,21 @@ def check_dataset(name: str, root: Path) -> list[Check]:
         path = root / filename
         checks.append(Check(f"{name}: {filename}", path.is_file(), str(path)))
 
-    databases = sorted((root / "database").glob("*/*.sqlite")) if root.is_dir() else []
-    checks.append(
-        Check(
-            f"{name}: файлы баз данных",
-            bool(databases),
-            f"найдено {len(databases)} шт." if databases else "не найдены — Execution Accuracy невозможна",
+    layout = LAYOUTS[name]
+    try:
+        load_dataset_schemas(root, layout)
+        train = load_examples(root, layout, "train")
+        dev = load_examples(root, layout, "eval")
+        if not train or not dev:
+            raise ValueError("пустое разбиение train или dev")
+        checks.append(Check(f"{name}: JSON и поля", True, "train, dev и схемы прочитаны"))
+        validate_execution_data(
+            [example.query for example in dev], [example.db_id for example in dev], root, layout
         )
-    )
+        checks.append(Check(f"{name}: базы и эталоны dev", True, f"проверено {len(dev)} запросов"))
+    except Exception as error:  # noqa: BLE001 — повреждённые данные отражаются в отчёте
+        checks.append(Check(f"{name}: данные dev", False, str(error)))
+
     return checks
 
 

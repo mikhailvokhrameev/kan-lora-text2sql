@@ -1,4 +1,4 @@
-# Exact Match по официальной методике Spider (`eval/exact_match.py`)
+# Структурный Exact Match Spider (`eval/exact_match.py`)
 
 **Модуль:** `src/kanlora/eval/exact_match.py`
 **Тесты:** `tests/eval/test_exact_match.py`
@@ -9,9 +9,9 @@
 
 В Spider Exact Match — это покомпонентное сравнение разобранного запроса
 (SELECT, WHERE, GROUP BY и так далее сравниваются как множества значений),
-а не равенство строк или собственный SQL-парсер. Собственная реализация дала
-бы числа, несравнимые с опубликованными в литературе результатами — а
-именно такое сравнение и есть цель работы. Поэтому `evaluation.py` и
+а не равенство строк или собственный SQL-парсер. Используется встроенный
+evaluator Spider, но полный современный leaderboard-протокол здесь не
+воспроизводится. `evaluation.py` и
 `process_sql.py` взяты из официального репозитория без единой правки;
 `src/kanlora/eval/exact_match.py` — это только обёртка вокруг них под
 интерфейс проекта.
@@ -177,3 +177,6 @@ Execution Accuracy реализована отдельно — см. [`execution
 конфигурация и карточка результата прогона — см.
 [`experiment-runner.md`](experiment-runner.md); замер задержки генерации
 со слиянием адаптера и без — см. [`latency.md`](latency.md).
+
+В текущем evaluator значения условий и `DISTINCT` отключены (`DISABLE_VALUE` и
+`DISABLE_DISTINCT`); метрика не является строковым равенством.

@@ -5,6 +5,8 @@
 """
 
 import importlib.util
+import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -26,8 +28,6 @@ def test_torch_check_reports_version(module) -> None:
     check = module.check_torch()
     assert check.ok is True
     assert "2." in check.detail
-
-
 
 
 def test_nltk_punkt_check_matches_actual_availability(module) -> None:
@@ -65,4 +65,47 @@ def test_present_dataset_files_are_detected(module, tmp_path: Path) -> None:
 
     checks = {check.name: check for check in module.check_dataset("spider", root)}
     assert checks["spider: train_spider.json"].ok is True
-    assert checks["spider: файлы баз данных"].ok is True
+
+
+def test_cuda_kernel_failure_is_reported(module, monkeypatch):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _: "fake GPU")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _: (6, 1))
+    monkeypatch.setattr(torch.cuda, "get_arch_list", lambda: ["sm_61"])
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("kernel failed")
+
+    monkeypatch.setattr(torch, "ones", fail)
+    checks = module.check_cuda()
+    assert any(not c.ok and "kernel failed" in c.detail for c in checks)
+
+
+def _dataset(root, queries):
+    root.mkdir()
+    entries = [{"db_id": db, "question": "q", "query": query} for db, query in queries]
+    files = (("train_spider.json", entries), ("dev.json", entries), ("tables.json", []))
+    for name, content in files:
+        (root / name).write_text(json.dumps(content))
+
+
+def _database(root, db):
+    path = root / "database" / db / f"{db}.sqlite"
+    path.parent.mkdir(parents=True)
+    sqlite3.connect(path).close()
+
+
+def test_all_dev_databases_are_required(module, tmp_path):
+    root = tmp_path / "spider"
+    _dataset(root, [("a", "select 1"), ("b", "select 1")])
+    _database(root, "a")
+    assert any(not c.ok and "b" in c.detail for c in module.check_dataset("spider", root))
+
+
+def test_dataset_gold_error_is_reported(module, tmp_path):
+    root = tmp_path / "spider"
+    _dataset(root, [("a", "select * from missing")])
+    _database(root, "a")
+    assert any(not c.ok and "эталон" in c.detail for c in module.check_dataset("spider", root))
