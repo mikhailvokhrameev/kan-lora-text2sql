@@ -67,6 +67,8 @@ def collect_provenance(config, device, indices, paths, model_revision, tokenizer
     if model_revision != config.model_revision or tokenizer_revision != config.model_revision:
         raise RuntimeError("Ревизии модели и токенизатора не совпадают с конфигурацией")
     return {
+        "evaluator_commit": "b7b5b8c890cd30e35427348bb9eb8c6d1350ca7c",
+        "lock_sha256": hashlib.sha256((Path(__file__).resolve().parents[2] / "uv.lock").read_bytes()).hexdigest(),
         "config": config_to_dict(config), "versions": collect_versions(),
         "git_commit": git_commit(), "tracked_tree_dirty": tracked_tree_dirty(),
         "indices": indices, "file_hashes": file_hashes(Path("."), [str(p) for p in paths]),

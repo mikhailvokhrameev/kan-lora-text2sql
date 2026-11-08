@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
+
+from kanlora.data.loaders import LAYOUTS
 
 METHODS = ("none", "lora", "dora", "kan_lora")
 
@@ -11,8 +14,7 @@ METHODS = ("none", "lora", "dora", "kan_lora")
 def load_cards(directory: Path) -> list[dict]:
     directory = Path(directory)
     cards = []
-    for path in sorted(directory.glob("*.json")):
-        raise ValueError(f"{path}: устаревший JSON; выберите каталог v2 одного run_kind")
+    allowed = set()
     for path in sorted(directory.glob("*/card.json")):
         card = json.loads(path.read_text(encoding="utf-8"))
         if card.get("schema_version") != 2:
@@ -23,7 +25,23 @@ def load_cards(directory: Path) -> list[dict]:
             value = artifacts.get(name)
             if not isinstance(value, str) or Path(value).is_absolute() or ".." in Path(value).parts or not (path.parent / value).is_file():
                 raise ValueError(f"{path}: отсутствует или недопустим артефакт {name}")
+        _validate_card(card)
+        prediction_path = path.parent / artifacts["predictions"]
+        predictions = [json.loads(line) for line in prediction_path.read_text(encoding="utf-8").splitlines()]
+        if [item["index"] for item in predictions] != card["provenance"]["indices"]["eval"]:
+            raise ValueError(f"{path}: predictions не соответствуют indices.eval")
+        root = Path(card["config"]["data_root"]) / card["dataset"]
+        layout = LAYOUTS[card["dataset"]]
+        expected = {str(root / layout.database_dir / item["db_id"] / (item["db_id"] + ".sqlite")) for item in predictions}
+        hashes = card["provenance"]["file_hashes"]
+        if any(not hashes.get(name) for name in expected):
+            raise ValueError(f"{path}: отсутствует file_hashes оценочной SQLite")
+        allowed.add(path)
+        allowed.update(path.parent / name for name in artifacts.values())
         cards.append(card)
+    for path in sorted(directory.rglob("*.json")):
+        if path not in allowed:
+            raise ValueError(f"{path}: устаревший JSON; выберите каталог v2 одного run_kind")
     return cards
 
 
@@ -62,6 +80,23 @@ def _conditions(card: dict, baseline_pair: bool, kan_pair: bool) -> dict:
                      "versions": card["versions"], "git_commit": card["git_commit"]})
 
 
+def _validate_card(card: dict) -> None:
+    provenance = card.get("provenance", {})
+    for field, length in (("evaluator_commit", 40), ("lock_sha256", 64)):
+        if not re.fullmatch(rf"[0-9a-f]{{{length}}}", str(provenance.get(field, ""))):
+            raise ValueError(f"{card.get('run_id')}: отсутствует или неверен provenance.{field}")
+    dataset = card["dataset"]
+    layout = LAYOUTS[dataset]
+    root = Path(card["config"]["data_root"]) / dataset
+    hashes = provenance.get("file_hashes", {})
+    required = [str(root / layout.eval_file), str(root / layout.tables_file)]
+    db_root = root / layout.database_dir
+    databases = [name for name in hashes if Path(name).parent.parent == db_root
+                 and Path(name).name == Path(name).parent.name + ".sqlite"]
+    if not databases or any(not hashes.get(name) for name in required + databases):
+        raise ValueError(f"{card.get('run_id')}: отсутствует file_hashes оценочных данных или SQLite")
+
+
 def validate_comparability(cards: list[dict]) -> None:
     if not cards:
         raise ValueError("нет карточек для итоговой таблицы")
@@ -70,6 +105,7 @@ def validate_comparability(cards: list[dict]) -> None:
     for card in cards:
         if card.get("schema_version") != 2:
             raise ValueError("требуется schema_version=2; выберите каталог v2")
+        _validate_card(card)
         key = (card["dataset"], card["method"], card["seed"])
         if key in cells:
             raise ValueError(f"повтор ячейки {key}")

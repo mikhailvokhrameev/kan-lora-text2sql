@@ -69,3 +69,11 @@ def test_staged_change_with_worktree_restored_is_dirty(tmp_path, monkeypatch):
     Path('tracked').write_text('original')
     with pytest.raises(RuntimeError):
         require_clean_tracked_tree()
+
+
+def test_provenance_records_evaluator_and_lock():
+    config = load_config(Path('configs/smoke.yaml'))
+    result = collect_provenance(config, torch.device('cpu'), {'eval': [0]}, [],
+                                config.model_revision, config.model_revision)
+    assert result['evaluator_commit'] == 'b7b5b8c890cd30e35427348bb9eb8c6d1350ca7c'
+    assert result['lock_sha256'] == hashlib.sha256(Path('uv.lock').read_bytes()).hexdigest()
