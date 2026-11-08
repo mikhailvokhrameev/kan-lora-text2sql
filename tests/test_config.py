@@ -62,15 +62,9 @@ def test_train_seed_follows_the_run_seed(config: ExperimentConfig) -> None:
 
 
 def test_run_id_encodes_the_whole_experiment_cell(config: ExperimentConfig) -> None:
-    """Имя прогона обязано различать все 22 ячейки матрицы."""
+    """Имя прогона различает метод, набор и зерно."""
     changed = apply_overrides(config, method="kan_lora", dataset="pauq", seed=2)
-    assert changed.run_id == "kan_lora-pauq-adamw-seed2"
-
-    muon = apply_overrides(config, method="lora", dataset="spider", optimizer_name="muon")
-    assert muon.run_id == "lora-spider-muon-seed0"
-
-    ablation = apply_overrides(config, method="kan_lora", learn_input_scale=False)
-    assert ablation.run_id.endswith("-no-input-scale")
+    assert changed.run_id == "kan_lora-pauq-seed2"
 
 
 def test_serialization_round_trips(config: ExperimentConfig, tmp_path: Path) -> None:
@@ -102,7 +96,6 @@ def test_baseline_run_id_does_not_name_an_optimizer(config: ExperimentConfig) ->
     """Без обучения оптимизатора нет; имя прогона не должно его упоминать."""
     baseline = apply_overrides(config, method="none", dataset="pauq", seed=1)
     assert baseline.run_id == "none-pauq-seed1"
-    assert apply_overrides(baseline, learn_input_scale=False).run_id == "none-pauq-seed1"
 
 
 def test_unknown_method_is_rejected(config: ExperimentConfig) -> None:

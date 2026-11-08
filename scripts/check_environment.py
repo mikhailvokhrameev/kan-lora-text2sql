@@ -1,8 +1,7 @@
 """Диагностика окружения перед запуском экспериментов.
 
-Отвечает на четыре вопроса, каждый из которых способен сорвать работу
-целиком: поддерживает ли сборка PyTorch данную видеокарту, есть ли Muon в
-torch.optim, скачаны ли данные токенизатора nltk (`punkt_tab`), нужные
+Проверяет, поддерживает ли сборка PyTorch данную видеокарту, скачаны ли
+данные токенизатора nltk (`punkt_tab`), нужные
 официальному скрипту оценки Spider, и лежат ли на диске файлы наборов вместе
 с базами данных для Execution Accuracy.
 
@@ -57,14 +56,6 @@ def check_cuda() -> list[Check]:
     ]
 
 
-def check_muon() -> Check:
-    import torch
-
-    present = hasattr(torch.optim, "Muon")
-    detail = "есть в torch.optim" if present else "отсутствует — нужна своя реализация"
-    return Check("Muon", present, detail)
-
-
 def check_nltk_punkt() -> Check:
     """Официальный скрипт оценки Spider (`third_party/spider_eval/process_sql.py`)
     вызывает `nltk.word_tokenize`, которому нужны скачанные данные `punkt_tab`.
@@ -107,7 +98,7 @@ def main() -> int:
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     arguments = parser.parse_args()
 
-    checks = [check_torch(), *check_cuda(), check_muon(), check_nltk_punkt()]
+    checks = [check_torch(), *check_cuda(), check_nltk_punkt()]
     for name in DATASET_FILES:
         checks.extend(check_dataset(name, arguments.data_root / name))
 

@@ -13,8 +13,8 @@ m * W / ||W|| в точности равно W и модель стартует 
 Норма ||V|| в знаменателе отсоединена от графа (detach), то есть при обратном
 проходе считается константой: так предложено в разд. 4.3 статьи DoRA (Liu et
 al., 2024) ради экономии памяти и так сделано в PEFT. Градиент сохраняют
-модуль m и числитель V. На значения прямого прохода и на слияние detach не
-влияет, меняются только градиенты.
+модуль m и числитель V. На значения прямого прохода detach не влияет,
+меняются только градиенты.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import math
 import torch
 from torch import nn
 
-from kanlora.adapters.base import AdapterConfig, AdapterLinear, _build_merged_linear
+from kanlora.adapters.base import AdapterConfig, AdapterLinear
 
 __all__ = ["DoRALinear"]
 
@@ -52,13 +52,3 @@ class DoRALinear(AdapterLinear):
             self.config.rank * (self.base.in_features + self.base.out_features)
             + self.base.out_features
         )
-
-    @property
-    def can_merge(self) -> bool:
-        return True
-
-    def merge(self) -> nn.Linear:
-        return _build_merged_linear(self.base, self.effective_weight())
-
-    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
-        return (self.lora_a, self.lora_b)

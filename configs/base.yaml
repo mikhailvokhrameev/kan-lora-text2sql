@@ -37,7 +37,6 @@ train:
   log_every: 20
 
 optimizer:
-  name: adamw
   learning_rate: 2.0e-4
   weight_decay: 0.0
   max_grad_norm: 1.0

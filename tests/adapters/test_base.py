@@ -28,9 +28,6 @@ class ConstantAdapter(AdapterLinear):
     def analytic_parameter_count(self) -> int:
         return self.base.out_features
 
-    @property
-    def can_merge(self) -> bool:
-        return False
 
 
 @pytest.fixture
@@ -60,27 +57,8 @@ def test_freeze_marks_every_parameter(adapter: ConstantAdapter) -> None:
     assert all(not p.requires_grad for p in adapter.parameters())
 
 
-def test_non_mergeable_adapter_refuses_to_merge(adapter: ConstantAdapter) -> None:
-    assert adapter.can_merge is False
-    with pytest.raises(NotImplementedError):
-        adapter.merge()
 
 
 def test_interface_cannot_be_instantiated_directly() -> None:
     with pytest.raises(TypeError):
         AdapterLinear(nn.Linear(IN_FEATURES, OUT_FEATURES), AdapterConfig())
-
-
-def test_default_mean_fraction_inside_grid_is_none(adapter: ConstantAdapter) -> None:
-    """Линейные адаптеры не ведут статистику сетки — цикл обучения не обязан о них знать."""
-    assert adapter.mean_fraction_inside_grid() is None
-
-
-def test_default_reset_fraction_inside_grid_is_a_noop(adapter: ConstantAdapter) -> None:
-    adapter.reset_fraction_inside_grid()
-    assert adapter.mean_fraction_inside_grid() is None
-
-
-def test_default_matrix_parameters_is_empty(adapter: ConstantAdapter) -> None:
-    """Muon получает только настоящие матрицы отображения — по умолчанию их нет."""
-    assert adapter.matrix_parameters() == ()

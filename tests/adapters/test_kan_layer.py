@@ -63,10 +63,6 @@ def test_all_parameters_receive_gradients(layer: KANLayer) -> None:
         assert torch.isfinite(parameter.grad).all(), name
 
 
-def test_reports_fraction_of_activations_inside_grid(layer: KANLayer) -> None:
-    """Диагностика вырождения: доля входов, попавших в область определения сетки."""
-    x = torch.tensor([[0.0] * RANK, [5.0] * RANK], dtype=torch.float64)
-    assert layer.fraction_inside_grid(x).item() == pytest.approx(0.5)
 
 
 def test_degenerates_outside_grid(layer: KANLayer) -> None:
@@ -102,7 +98,6 @@ def test_near_zero_scale_does_not_blow_up(layer: KANLayer) -> None:
     x = torch.full((3, RANK), 0.1, dtype=torch.float64)
     out = layer(x)
     assert torch.isfinite(out).all()
-    assert torch.isfinite(layer.fraction_inside_grid(x)).all()
 
 
 def test_default_scale_unaffected_by_floor(layer: KANLayer) -> None:

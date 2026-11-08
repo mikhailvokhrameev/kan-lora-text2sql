@@ -17,26 +17,6 @@ from torch import nn
 __all__ = ["AdapterConfig", "AdapterLinear", "freeze"]
 
 
-def _build_merged_linear(base: nn.Linear, weight: torch.Tensor) -> nn.Linear:
-    """Строит nn.Linear с готовым весом поверх формы/dtype/device и bias базы.
-
-    Общая часть merge() у LoRA и DoRA — они расходятся только в выражении
-    для итогового веса, поэтому это выражение остаётся вызывающей стороне.
-    """
-    merged = nn.Linear(
-        base.in_features,
-        base.out_features,
-        bias=base.bias is not None,
-        device=base.weight.device,
-        dtype=base.weight.dtype,
-    )
-    with torch.no_grad():
-        merged.weight.copy_(weight)
-        if base.bias is not None:
-            merged.bias.copy_(base.bias)
-    return merged
-
-
 @dataclass(frozen=True)
 class AdapterConfig:
     """Гиперпараметры адаптера, общие для всех трёх методов.
@@ -82,46 +62,8 @@ class AdapterLinear(nn.Module, ABC):
         что утверждение о равном бюджете параметров в таблицах неверно.
         """
 
-    @property
-    @abstractmethod
-    def can_merge(self) -> bool:
-        """Сливается ли поправка с весами основы после обучения."""
-
-    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
-        """Параметры, реально задающие линейное отображение матричным умножением.
-
-        Только они допустимы для Muon: его ортогонализация Ньютона — Шульца
-        осмысленна лишь для параметра вида y = W @ x, а не для любого
-        тензора, которому случайно досталась двумерная форма (см.
-        `KANLayer.spline_scale`/`base_weight` — это поэлементные веса на
-        сетке рёбер, а не матрица отображения). По умолчанию пуст —
-        переопределяется в LoRA, DoRA и KAN-LoRA, единственных методах, где
-        такие параметры вообще есть.
-        """
-        return ()
-
     def trainable_parameter_count(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
-    def mean_fraction_inside_grid(self) -> float | None:
-        """Средняя доля активаций внутри сетки сплайна по обучающим проходам.
-
-        По умолчанию `None` — статистика есть только у KAN-LoRA. Метод живёт
-        здесь, а не проверяется через isinstance в цикле обучения, чтобы
-        `loop.py` оставался общим для всех адаптеров и не знал про KAN-LoRA
-        напрямую.
-        """
-        return None
-
-    def reset_fraction_inside_grid(self) -> None:
-        """Сбрасывает накопленную статистику сетки. По умолчанию нечего сбрасывать."""
-
-    def merge(self) -> nn.Linear:
-        """Возвращает обычный nn.Linear с поглощённой поправкой."""
-        raise NotImplementedError(
-            f"{type(self).__name__} нелинеен и не сливается с весами: "
-            "поправка зависит от входа, а не только от весов"
-        )
 
     def extra_repr(self) -> str:
         return (

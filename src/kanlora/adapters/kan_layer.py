@@ -41,8 +41,7 @@ class KANLayer(nn.Module):
 
     Тождество действует внутри сетки. За её пределами сплайновая ветвь
     отдаёт ноль (при инициализации — и весь слой: вес базовой ветви
-    нулевой), и доля таких входов отслеживается методом
-    `fraction_inside_grid`.
+    нулевой).
     """
 
     def __init__(
@@ -114,16 +113,6 @@ class KANLayer(nn.Module):
 
         edges = base + self.spline_scale * spline
         return (edges * self.input_scale).sum(dim=-1)
-
-    def fraction_inside_grid(self, x: torch.Tensor) -> torch.Tensor:
-        """Доля входов, попавших в область определения сетки.
-
-        Показатель вырождения: чем он ниже, тем большая часть адаптера не
-        участвует в вычислении.
-        """
-        lo, hi = self.grid_range
-        scaled = x / self.input_scale_divisor()
-        return ((scaled >= lo) & (scaled <= hi)).to(x.dtype).mean()
 
     def parameter_count(self) -> int:
         return sum(p.numel() for p in self.parameters())

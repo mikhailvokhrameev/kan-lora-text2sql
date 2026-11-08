@@ -14,8 +14,8 @@
 Валидационная функция потерь (учебник §3.7; лекция 5 MLOps — «val loss на
 шаге 0») считается до первого шага и в конце каждой эпохи на примерах train,
 не вошедших в обучающую подвыборку. Проходы по валидации идут в режиме eval
-без градиента: в функцию потерь эпохи и в долю активаций в сетке они не
-входят, а их время вычитается из времени обучения. Градиентный чекпоинтинг включён, чтобы
+без градиента: в функцию потерь эпохи они не входят, а их время вычитается
+из времени обучения. Градиентный чекпоинтинг включён, чтобы
 модель в fp32 помещалась в 11 ГБ.
 """
 
@@ -29,7 +29,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from kanlora.adapters.inject import adapter_modules
 from kanlora.train.memory import PeakMemoryTracker
 from kanlora.train.optimizers import OptimizerConfig, build_optimizer
 
@@ -58,10 +57,8 @@ class TrainReport:
     # Норма градиента до обрезания, по одной на шаг оптимизатора: видно, как
     # часто срабатывает обрезание и как меняется масштаб градиента.
     grad_norms: list[float] = field(default_factory=list)
-    fraction_inside_grid: list[float] = field(default_factory=list)
     peak_memory_bytes: int = 0
     seconds: float = 0.0
-    optimizer_coverage: dict[str, int] = field(default_factory=dict)
 
 
 def set_seed(seed: int) -> None:
@@ -69,12 +66,6 @@ def set_seed(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-
-
-def _mean_fraction_inside_grid(model: torch.nn.Module) -> float | None:
-    values = [module.mean_fraction_inside_grid() for _, module in adapter_modules(model)]
-    present = [value for value in values if value is not None]
-    return sum(present) / len(present) if present else None
 
 
 def _group_size(index: int, batches: int, accumulation: int) -> int:
@@ -130,7 +121,8 @@ def train(
         collate_fn=collator,
         generator=torch.Generator().manual_seed(train_config.seed),
     )
-    bundle = build_optimizer(model, optimizer_config)
+    optimizer = build_optimizer(model, optimizer_config)
+    parameters = [p for p in model.parameters() if p.requires_grad]
     tracker = PeakMemoryTracker(device)
     tracker.reset()
 
@@ -145,7 +137,7 @@ def train(
         else None
     )
 
-    report = TrainReport(optimizer_coverage=bundle.coverage())
+    report = TrainReport()
     validation_seconds = 0.0
     started = time.perf_counter()
 
@@ -161,12 +153,7 @@ def train(
 
     for epoch in range(train_config.epochs):
         epoch_total, epoch_batches = 0.0, 0
-        bundle.zero_grad()
-        # Доля активаций в сетке — среднее за эпоху, а не за весь прогон: на
-        # графике по эпохам виден дрейф, и на последний микробатч значение не
-        # опирается.
-        for _, module in adapter_modules(model):
-            module.reset_fraction_inside_grid()
+        optimizer.zero_grad(set_to_none=True)
 
         for index, batch in enumerate(loader, start=1):
             batch = {key: value.to(device) for key, value in batch.items()}
@@ -182,15 +169,12 @@ def train(
                 print(f"шаг {index}/{len(loader)} (эпоха {epoch + 1}): функция потерь {step_loss:.4f}")
 
             if index % train_config.gradient_accumulation == 0 or index == len(loader):
-                norm = bundle.clip_grad_norm_(optimizer_config.max_grad_norm)
+                norm = torch.nn.utils.clip_grad_norm_(parameters, optimizer_config.max_grad_norm)
                 report.grad_norms.append(norm.item())
-                bundle.step()
-                bundle.zero_grad()
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
 
         report.epoch_losses.append(epoch_total / max(epoch_batches, 1))
-        fraction = _mean_fraction_inside_grid(model)
-        if fraction is not None:
-            report.fraction_inside_grid.append(fraction)
         validate()
 
         print(
@@ -201,7 +185,6 @@ def train(
                 if validation_loader is not None
                 else ""
             )
-            + (f", доля активаций в сетке {fraction:.3f}" if fraction is not None else "")
         )
 
     report.seconds = time.perf_counter() - started - validation_seconds

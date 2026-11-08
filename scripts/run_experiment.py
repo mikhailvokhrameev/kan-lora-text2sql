@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 import torch
@@ -28,7 +27,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from kanlora.adapters.inject import inject_adapters
-from kanlora.analysis.spline_stats import model_nonlinearity
 from kanlora.config import METHODS, apply_overrides, load_config
 from kanlora.data.collate import Collator, build_dataset, build_prompts
 from kanlora.data.loaders import (
@@ -41,7 +39,6 @@ from kanlora.data.loaders import (
 from kanlora.eval.exact_match import exact_match_by_hardness
 from kanlora.eval.execution import count_available_databases, execution_accuracy
 from kanlora.eval.generate import count_truncated_prompts, generate_sql
-from kanlora.eval.latency import measure_latency
 from kanlora.results import build_result_card, file_hashes, write_result_card
 from kanlora.train.loop import set_seed, train
 
@@ -54,14 +51,6 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument("--dataset", choices=["spider", "pauq"])
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--optimizer", dest="optimizer_name", choices=["adamw", "muon"])
-    parser.add_argument(
-        "--no-input-scale",
-        dest="learn_input_scale",
-        action="store_const",
-        const=False,
-        help="абляция: сетка сплайна не растягивается, масштаб входа заморожен на 1.0",
-    )
     parser.add_argument("--train-subset", type=int)
     parser.add_argument("--eval-limit", type=int)
     parser.add_argument("--output", type=Path, default=Path("results"))
@@ -116,21 +105,6 @@ def adapt_and_train(
     return injection_info, report, truncated
 
 
-def nonlinearity_and_latency(config, model, tokenizer, prompt: str, device):
-    """Индекс нелинейности, затем задержка генерации — именно в таком порядке.
-
-    Генерация замера проходит через адаптеры и расширяет observed_range KAN-LoRA,
-    а индекс мерится по размаху, накопленному за обучение, валидацию и оценку.
-    Задержка мерится без слияния: у LoRA и DoRA после слияния она равна задержке базовой модели
-    (прогон `method: none`), а KAN-LoRA не сливается в принципе.
-    """
-    spline_stats = model_nonlinearity(model) or None
-    report = measure_latency(
-        model, tokenizer, prompt, device=device, max_new_tokens=config.max_new_tokens
-    )
-    return spline_stats, {**asdict(report), "device": device.type}
-
-
 def main() -> int:
     arguments = parse_arguments()
     config = apply_overrides(
@@ -138,8 +112,6 @@ def main() -> int:
         method=arguments.method,
         dataset=arguments.dataset,
         seed=arguments.seed,
-        optimizer_name=arguments.optimizer_name,
-        learn_input_scale=arguments.learn_input_scale,
         train_subset=arguments.train_subset,
         eval_limit=arguments.eval_limit,
     )
@@ -217,14 +189,11 @@ def main() -> int:
             gold, predicted, db_ids, root, layout
         )
 
-    spline_stats, latency = nonlinearity_and_latency(config, model, tokenizer, prompts[0], device)
     card = build_result_card(
         config=config,
         injection=injection,
         train_report=report,
         metrics=metrics,
-        spline_stats=spline_stats,
-        latency=latency,
         data_files=file_hashes(root, [layout.train_file, layout.eval_file, layout.tables_file]),
         # transformers записывает коммит репозитория модели при загрузке с Hub.
         model_revision=getattr(model.config, "_commit_hash", None),
@@ -240,7 +209,6 @@ def main() -> int:
             f", пик видеопамяти {report.peak_memory_bytes / 2**30:.2f} ГиБ, "
             f"время {report.seconds / 60:.1f} мин"
         )
-    summary += f", задержка {latency['seconds_per_token'] * 1000:.1f} мс/токен"
     print(summary)
     print(f"карточка: {path}")
     return 0

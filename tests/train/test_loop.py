@@ -14,7 +14,7 @@ import torch
 from conftest import unfreeze_embeddings, unfreeze_norms
 
 from kanlora.adapters.base import AdapterConfig
-from kanlora.adapters.inject import adapter_modules, inject_adapters
+from kanlora.adapters.inject import inject_adapters
 from kanlora.data.collate import IGNORE_INDEX, Collator
 from kanlora.train.loop import TrainConfig, set_seed, train
 from kanlora.train.optimizers import OptimizerConfig
@@ -68,7 +68,7 @@ def test_overfits_twenty_examples(tiny_causal_lm, method: str) -> None:
         model=tiny_causal_lm,
         dataset=twenty_examples(),
         collator=Collator(pad_token_id=0),
-        optimizer_config=OptimizerConfig(name="adamw", learning_rate=0.005),
+        optimizer_config=OptimizerConfig(learning_rate=0.005),
         train_config=TrainConfig(
             epochs=150, batch_size=4, gradient_accumulation=1,
             gradient_checkpointing=False, seed=0,
@@ -139,83 +139,10 @@ def test_only_adapter_parameters_change(tiny_causal_lm) -> None:
         assert torch.equal(before, after), f"замороженный параметр изменился: {name}"
 
 
-@pytest.mark.slow
-def test_reports_fraction_inside_grid_per_epoch(tiny_causal_lm) -> None:
-    """Доля активаций внутри сетки логируется каждую эпоху — это готовый график."""
-    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
-
-    report = train(
-        model=tiny_causal_lm,
-        dataset=twenty_examples(),
-        collator=Collator(pad_token_id=0),
-        optimizer_config=OptimizerConfig(learning_rate=0.01),
-        train_config=TrainConfig(epochs=3, batch_size=4, gradient_accumulation=1,
-                                 gradient_checkpointing=False),
-        device=DEVICE,
-    )
-
-    assert len(report.fraction_inside_grid) == 3
-    assert all(0.0 <= value <= 1.0 for value in report.fraction_inside_grid)
 
 
-@pytest.mark.slow
-def test_fraction_inside_grid_is_the_epoch_mean_not_the_last_microbatch(
-    tiny_causal_lm,
-) -> None:
-    """Значение за эпоху — среднее по всем проходам эпохи; сброс в начале каждой эпохи."""
-    inject_adapters(tiny_causal_lm, "kan_lora", AdapterConfig(rank=4))
-    adapters = [module for _, module in adapter_modules(tiny_causal_lm)]
-
-    # Запись долей, которые адаптеры видят на каждом проходе, по порядку вызовов.
-    recorded: list[list[float]] = [[] for _ in adapters]
-    for values, module in zip(recorded, adapters):
-        original = module.kan.fraction_inside_grid
-
-        def spy(x, original=original, values=values):
-            fraction = original(x)
-            values.append(fraction.item())
-            return fraction
-
-        module.kan.fraction_inside_grid = spy
-
-    epochs, batches_per_epoch = 3, 5  # 20 примеров по 4, без накопления и чекпоинтинга
-    report = train(
-        model=tiny_causal_lm,
-        dataset=twenty_examples(),
-        collator=Collator(pad_token_id=0),
-        optimizer_config=OptimizerConfig(learning_rate=0.01),
-        train_config=TrainConfig(epochs=epochs, batch_size=4, gradient_accumulation=1,
-                                 gradient_checkpointing=False),
-        device=DEVICE,
-    )
-
-    expected, last_microbatch = [], []
-    for epoch in range(epochs):
-        window = slice(epoch * batches_per_epoch, (epoch + 1) * batches_per_epoch)
-        per_adapter = [sum(values[window]) / batches_per_epoch for values in recorded]
-        expected.append(sum(per_adapter) / len(per_adapter))
-        last_microbatch.append(sum(values[window][-1] for values in recorded) / len(recorded))
-
-    assert len(report.fraction_inside_grid) == epochs
-    assert report.fraction_inside_grid == pytest.approx(expected)
-    assert report.fraction_inside_grid != pytest.approx(last_microbatch)
 
 
-@pytest.mark.slow
-def test_linear_methods_report_no_grid_statistics(tiny_causal_lm) -> None:
-    inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
-
-    report = train(
-        model=tiny_causal_lm,
-        dataset=twenty_examples(),
-        collator=Collator(pad_token_id=0),
-        optimizer_config=OptimizerConfig(learning_rate=0.01),
-        train_config=TrainConfig(epochs=2, batch_size=4, gradient_accumulation=1,
-                                 gradient_checkpointing=False),
-        device=DEVICE,
-    )
-
-    assert report.fraction_inside_grid == []
 
 
 @pytest.mark.slow
@@ -273,14 +200,14 @@ def test_logs_loss_every_log_every_steps(tiny_causal_lm, capsys) -> None:
 
 
 @pytest.mark.slow
-def test_report_carries_timing_memory_and_coverage(tiny_causal_lm) -> None:
+def test_report_carries_timing_and_memory(tiny_causal_lm) -> None:
     inject_adapters(tiny_causal_lm, "lora", AdapterConfig(rank=4))
 
     report = train(
         model=tiny_causal_lm,
         dataset=twenty_examples(),
         collator=Collator(pad_token_id=0),
-        optimizer_config=OptimizerConfig(name="muon", learning_rate=0.01),
+        optimizer_config=OptimizerConfig(learning_rate=0.01),
         train_config=TrainConfig(epochs=1, batch_size=4, gradient_accumulation=1,
                                  gradient_checkpointing=False),
         device=DEVICE,
@@ -288,7 +215,6 @@ def test_report_carries_timing_memory_and_coverage(tiny_causal_lm) -> None:
 
     assert report.seconds > 0
     assert report.peak_memory_bytes == 0  # на процессоре замера нет, и это честно видно
-    assert report.optimizer_coverage["muon"] > 0
     assert len(report.step_losses) == 5
 
 
@@ -327,7 +253,7 @@ def test_validation_loss_is_measured_at_step_zero_and_after_every_epoch(tiny_cau
 
 
 def test_validation_passes_do_not_touch_training_statistics(tiny_causal_lm) -> None:
-    """Проходы по валидации не входят ни в функцию потерь эпохи, ни в долю активаций в сетке."""
+    """Проходы по валидации не входят в функцию потерь обучения."""
     reports = []
     for validation in (None, twenty_examples(seed=1)[:6]):
         set_seed(0)
@@ -349,7 +275,6 @@ def test_validation_passes_do_not_touch_training_statistics(tiny_causal_lm) -> N
     without, with_validation = reports
     assert without.validation_losses == []
     assert with_validation.step_losses == pytest.approx(without.step_losses)
-    assert with_validation.fraction_inside_grid == pytest.approx(without.fraction_inside_grid)
 
 
 def test_report_records_gradient_norm_before_clipping(tiny_causal_lm) -> None:

@@ -53,12 +53,7 @@ class ExperimentConfig:
 
         У базовой модели без адаптера оптимизатора нет: обучения не было.
         """
-        if self.method == "none":
-            return f"none-{self.dataset}-seed{self.seed}"
-        name = f"{self.method}-{self.dataset}-{self.optimizer.name}-seed{self.seed}"
-        if self.method == "kan_lora" and not self.adapter.learn_input_scale:
-            name += "-no-input-scale"
-        return name
+        return f"{self.method}-{self.dataset}-seed{self.seed}"
 
 
 def load_config(path: Path) -> ExperimentConfig:
@@ -88,8 +83,6 @@ def apply_overrides(
     method: str | None = None,
     dataset: str | None = None,
     seed: int | None = None,
-    optimizer_name: str | None = None,
-    learn_input_scale: bool | None = None,
     train_subset: int | None = None,
     eval_limit: int | None = None,
 ) -> ExperimentConfig:
@@ -101,12 +94,6 @@ def apply_overrides(
         updated = replace(updated, dataset=dataset)
     if seed is not None:
         updated = replace(updated, seed=seed, train=replace(updated.train, seed=seed))
-    if optimizer_name is not None:
-        updated = replace(updated, optimizer=replace(updated.optimizer, name=optimizer_name))
-    if learn_input_scale is not None:
-        updated = replace(
-            updated, adapter=replace(updated.adapter, learn_input_scale=learn_input_scale)
-        )
     if train_subset is not None:
         updated = replace(updated, train_subset=train_subset)
     if eval_limit is not None:

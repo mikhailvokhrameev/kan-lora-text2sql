@@ -80,30 +80,10 @@ def test_parameter_count_matches_formula(adapter: DoRALinear) -> None:
     assert adapter.trainable_parameter_count() == expected
 
 
-def test_merged_linear_reproduces_adapter_output(adapter: DoRALinear) -> None:
-    with torch.no_grad():
-        adapter.lora_b.normal_()
-        adapter.magnitude.mul_(1.3)
-
-    assert adapter.can_merge is True
-    merged = adapter.merge()
-    x = torch.randn(16, IN_FEATURES, dtype=torch.float64)
-    assert torch.allclose(merged(x), adapter(x), atol=1e-10)
 
 
-def test_merge_matches_base_bias_dtype_and_device(base: nn.Linear, adapter: DoRALinear) -> None:
-    merged = adapter.merge()
-    assert isinstance(merged, nn.Linear)
-    assert (merged.bias is not None) == (base.bias is not None)
-    assert merged.weight.dtype == base.weight.dtype
-    assert merged.weight.device == base.weight.device
 
 
-def test_merge_omits_bias_when_base_has_none(config: AdapterConfig) -> None:
-    base_without_bias = nn.Linear(IN_FEATURES, OUT_FEATURES, bias=False, dtype=torch.float64)
-    adapter_without_bias = DoRALinear(base_without_bias, config)
-    merged = adapter_without_bias.merge()
-    assert merged.bias is None
 
 
 def test_gradients_reach_magnitude_and_both_matrices(adapter: DoRALinear) -> None:
@@ -148,8 +128,3 @@ def test_gradient_does_not_flow_through_direction_norm(
     assert torch.allclose(adapter.lora_a.grad, lora_a.grad, atol=1e-10)
     assert torch.allclose(adapter.lora_b.grad, lora_b.grad, atol=1e-10)
     assert torch.allclose(adapter.magnitude.grad, magnitude.grad, atol=1e-10)
-
-
-def test_matrix_parameters_are_lora_a_and_lora_b(adapter: DoRALinear) -> None:
-    """Вектор модуля в список не входит: у него нет формы линейного отображения."""
-    assert adapter.matrix_parameters() == (adapter.lora_a, adapter.lora_b)

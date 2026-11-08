@@ -15,14 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from collections import defaultdict
 from pathlib import Path
-
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 METRICS = ("exact_match", "execution_accuracy")
 
@@ -34,40 +28,16 @@ def load_cards(directory: Path) -> list[dict]:
     ]
 
 
-CellKey = tuple[str, str, str | None, bool | None]
+CellKey = tuple[str, str]
 
 # Базовая модель без адаптера (`method: none`): обучения не было, оптимизатора
 # и масштаба входа у неё нет.
 BASELINE = "none"
 BASELINE_LABEL = "без адаптера (базовый уровень)"
 
-# Значения конфигурации по умолчанию (configs/base.yaml): ими читаются старые карточки,
-# в которых этих полей ещё не было.
-DEFAULT_OPTIMIZER = "adamw"
-DEFAULT_LEARN_INPUT_SCALE = True
-
-
 def cell_key(card: dict) -> CellKey:
-    """Ключ агрегации: всё, что отличает конфигурацию, кроме зерна.
-
-    Прогоны с Muon и абляция без обучаемого масштаба входа — другие эксперименты,
-    их нельзя усреднять с основным. learn_input_scale различает только KAN-LoRA
-    (как и run_id): у LoRA/DoRA поле не используется и ключ не расщепляет.
-    У базовой модели без адаптера ключ — (none, набор, None, None): секция
-    optimizer её замороженной конфигурации не подхватывается, обучения не было.
-    """
-    if card["method"] == BASELINE:
-        return (BASELINE, card["dataset"], None, None)
-    config = card.get("config") or {}
-    optimizer = (
-        card.get("optimizer") or (config.get("optimizer") or {}).get("name") or DEFAULT_OPTIMIZER
-    )
-    learn_input_scale = (config.get("adapter") or {}).get(
-        "learn_input_scale", DEFAULT_LEARN_INPUT_SCALE
-    )
-    if card["method"] != "kan_lora":
-        learn_input_scale = DEFAULT_LEARN_INPUT_SCALE
-    return (card["method"], card["dataset"], optimizer, bool(learn_input_scale))
+    """Группирует карточки по методу и набору данных."""
+    return card["method"], card["dataset"]
 
 
 def _flatten(section: dict, prefix: str = "") -> dict[str, object]:
@@ -85,10 +55,8 @@ def _flatten(section: dict, prefix: str = "") -> dict[str, object]:
 def _comparable_config(card: dict) -> dict[str, object] | None:
     """Конфигурация карточки без зерна и без полей, которые её ячейку не различают.
 
-    Те же исключения, что в `cell_key`: масштаб входа у LoRA/DoRA не
-    используется, у базовой модели нет ни оптимизатора, ни адаптера. Карточка
-    без конфигурации (старый формат) сравнению не подлежит — как и карточка
-    без задержки, она не опровергает остальные.
+    Масштаб входа у LoRA/DoRA не используется, у базовой модели нет ни
+    оптимизатора, ни адаптера. Карточка без конфигурации сравнению не подлежит.
     """
     config = card.get("config")
     if not config:
@@ -106,8 +74,8 @@ def _check_comparable(key: CellKey, cards: list[dict]) -> None:
     """Бросает ValueError, если карточки одной ячейки получены в разных условиях.
 
     Имена файлов смок-прогона и полного прогона совпадают, и без этой проверки
-    ячейка молча усреднила бы 50 примеров смока с полной отложенной выборкой, а
-    задержку на CPU — с задержкой на GPU. Различаться могут только зёрна.
+    ячейка молча усреднила бы 50 примеров смока с полной отложенной выборкой.
+    Различаться могут только зёрна.
     """
     reference_card = None
     reference_config = None
@@ -130,40 +98,32 @@ def _check_comparable(key: CellKey, cards: list[dict]) -> None:
                 "их нельзя усреднять, уберите лишние карточки из каталога результатов"
             )
 
-    devices: dict[str, str] = {}
-    for card in cards:
-        device = (card.get("latency") or {}).get("device")
-        if device is not None:
-            devices.setdefault(device, card["run_id"])
-    if len(devices) > 1:
-        raise ValueError(
-            f"ячейка {key}: задержка измерена на разных устройствах "
-            f"(latency.device): {', '.join(f'{d} в {r}' for d, r in devices.items())}; "
-            "их нельзя усреднять, уберите лишние карточки из каталога результатов"
-        )
-
 
 def aggregate(cards: list[dict]) -> dict[CellKey, dict]:
-    """Среднее и размах по зёрнам для каждой ячейки «метод, набор, оптимизатор, масштаб входа».
+    """Среднее и размах по зёрнам для каждой ячейки «метод, набор».
 
     Размах, а не стандартное отклонение: при трёх зёрнах отклонение оценивается
     плохо, а размах говорит ровно то, что нужно, — насколько далеко разъезжаются
     прогоны одного метода.
 
-    Карточки одной ячейки обязаны различаться только зерном: конфигурация и
-    устройство замера задержки у них одни (`_check_comparable`), иначе ValueError.
+    Карточки одной ячейки обязаны различаться только зерном (`_check_comparable`).
     """
     buckets: dict[CellKey, dict[str, list[float | None]]] = defaultdict(
         lambda: defaultdict(list)
     )
     members: dict[CellKey, list[dict]] = defaultdict(list)
     for card in cards:
+        config = card.get("config") or {}
+        optimizer = card.get("optimizer") or (config.get("optimizer") or {}).get("name")
+        if card["method"] != BASELINE and optimizer not in (None, "adamw"):
+            raise ValueError(f"неподдерживаемый оптимизатор {optimizer} в {card['run_id']}")
+        if card["method"] == "kan_lora" and (config.get("adapter") or {}).get("learn_input_scale") is False:
+            raise ValueError(f"неподдерживаемая конфигурация learn_input_scale в {card['run_id']}")
         key = cell_key(card)
         members[key].append(card)
         for metric in METRICS:
             buckets[key][metric].append(card["metrics"].get(metric))
         buckets[key]["peak_memory_bytes"].append(card.get("peak_memory_bytes"))
-        buckets[key]["seconds_per_token"].append((card.get("latency") or {}).get("seconds_per_token"))
         buckets[key]["trainable_parameters"].append(card.get("trainable_parameters"))
 
     aggregated: dict[CellKey, dict] = {}
@@ -189,8 +149,8 @@ def _cell(value: tuple[float, float] | None, digits: int = 4) -> str:
 
 def _row_order(key: CellKey) -> tuple:
     """Базовый уровень — первыми строками, затем методы в прежнем порядке."""
-    method, dataset, optimizer, learn_input_scale = key
-    return (method != BASELINE, method, dataset, optimizer or "", bool(learn_input_scale))
+    method, dataset = key
+    return (method != BASELINE, method, dataset)
 
 
 def main_table(cards: list[dict]) -> str:
@@ -201,94 +161,30 @@ def main_table(cards: list[dict]) -> str:
     """
     aggregated = aggregate(cards)
     lines = [
-        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров | Задержка без слияния, мс/токен |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Метод | Оптимизатор | Набор | Exact Match | Execution Accuracy | Пик видеопамяти, ГиБ | Обучаемых параметров |",
+        "|---|---|---|---|---|---|---|",
     ]
     if not any(key[0] == BASELINE for key in aggregated):
-        lines.append(f"| {BASELINE_LABEL} | — | — | нет прогона | нет прогона | — | — | — |")
+        lines.append(f"| {BASELINE_LABEL} | — | — | нет прогона | нет прогона | — | — |")
     for key in sorted(aggregated, key=_row_order):
-        method, dataset, optimizer, learn_input_scale = key
+        method, dataset = key
         summary = aggregated[key]
         if method == BASELINE:
             label = BASELINE_LABEL
         else:
-            label = method if learn_input_scale else f"{method} (без масштаба входа)"
+            label = method
         memory = summary["peak_memory_bytes"]
         parameters = summary["trainable_parameters"]
         # У базового уровня обучения не было: пика видеопамяти обучения и
         # обучаемых параметров нет (null в карточке), в таблице — прочерк.
         memory_cell = f"{memory[0] / 2**30:.2f}" if memory is not None else "—"
         parameters_cell = f"{int(parameters[0])}" if parameters is not None else "—"
-        latency = summary["seconds_per_token"]
-        latency_cell = f"{latency[0] * 1000:.1f}" if latency is not None else "—"
         lines.append(
-            f"| {label} | {optimizer or '—'} | {dataset} "
+            f"| {label} | {'—' if method == BASELINE else 'adamw'} | {dataset} "
             f"| {_cell(summary['exact_match'])} | {_cell(summary['execution_accuracy'])} "
-            f"| {memory_cell} | {parameters_cell} | {latency_cell} |"
+            f"| {memory_cell} | {parameters_cell} |"
         )
     return "\n".join(lines)
-
-
-def nonlinearity_table(cards: list[dict]) -> str:
-    lines = [
-        (
-            "| Прогон | Индекс нелинейности, среднее по адаптерам | Максимум по адаптерам "
-            "| Доля активаций в сетке |"
-        ),
-        "|---|---|---|---|",
-    ]
-    for card in sorted(cards, key=lambda item: item["run_id"]):
-        stats = card.get("spline_stats")
-        if not stats:
-            continue
-        # NaN — все активации адаптера вне сетки, мерить нечего (docs/nonlinearity.md);
-        # без "index" — карточка старого формата (mean/max по рёбрам), с новыми
-        # несравнимая. Такие адаптеры пропускаются.
-        values = [
-            v["index"] for v in stats.values() if not math.isnan(v.get("index", math.nan))
-        ]
-        mean_cell = f"{sum(values) / len(values):.4f}" if values else "не измерялась"
-        max_cell = f"{max(values):.4f}" if values else "не измерялась"
-        fractions = card.get("fraction_inside_grid") or [float("nan")]
-        lines.append(f"| {card['run_id']} | {mean_cell} | {max_cell} | {fractions[-1]:.3f} |")
-    return "\n".join(lines)
-
-
-def optimizer_table(cards: list[dict]) -> str:
-    """Покрытие параметров оптимизатором Muon — самостоятельный результат работы."""
-    lines = ["| Прогон | Параметров в Muon | Параметров в AdamW | Доля в Muon |", "|---|---|---|---|"]
-    for card in sorted(cards, key=lambda item: item["run_id"]):
-        if card["method"] == BASELINE:
-            continue  # без обучения оптимизатора нет
-        coverage = card.get("optimizer_coverage") or {}
-        muon, adamw = coverage.get("muon", 0), coverage.get("adamw", 0)
-        total = muon + adamw
-        if total:
-            lines.append(f"| {card['run_id']} | {muon} | {adamw} | {muon / total:.3f} |")
-        else:
-            lines.append(f"| {card['run_id']} | 0 | 0 | — |")
-    return "\n".join(lines)
-
-
-def plot_fraction_inside_grid(cards: list[dict], path: Path) -> None:
-    figure, axes = plt.subplots(figsize=(7, 4))
-    for card in sorted(cards, key=lambda item: item["run_id"]):
-        values = card.get("fraction_inside_grid")
-        if values:
-            axes.plot(range(1, len(values) + 1), values, marker="o", label=card["run_id"])
-
-    axes.set_xlabel("эпоха")
-    axes.set_ylabel("доля активаций внутри сетки")
-    axes.set_title("Вырождается ли сплайновый базис в ходе обучения")
-    axes.set_ylim(0.0, 1.05)
-    axes.grid(True, alpha=0.3)
-    if axes.get_legend_handles_labels()[0]:
-        axes.legend(fontsize="small")
-
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    figure.tight_layout()
-    figure.savefig(path, dpi=150)
-    plt.close(figure)
 
 
 def main() -> int:
@@ -307,14 +203,9 @@ def main() -> int:
     tables.write_text(
         "# Результаты\n\n## Основная матрица\n\n"
         + main_table(cards)
-        + "\n\n## Выученная нелинейность\n\n"
-        + nonlinearity_table(cards)
-        + "\n\n## Покрытие параметров оптимизатором Muon\n\n"
-        + optimizer_table(cards)
         + "\n",
         encoding="utf-8",
     )
-    plot_fraction_inside_grid(cards, arguments.output / "figures" / "fraction_inside_grid.png")
 
     print(f"собрано карточек: {len(cards)}; таблицы: {tables}")
     return 0

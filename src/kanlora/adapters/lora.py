@@ -15,7 +15,7 @@ import math
 import torch
 from torch import nn
 
-from kanlora.adapters.base import AdapterConfig, AdapterLinear, _build_merged_linear
+from kanlora.adapters.base import AdapterConfig, AdapterLinear
 
 __all__ = ["LoRALinear"]
 
@@ -37,14 +37,3 @@ class LoRALinear(AdapterLinear):
 
     def analytic_parameter_count(self) -> int:
         return self.config.rank * (self.base.in_features + self.base.out_features)
-
-    @property
-    def can_merge(self) -> bool:
-        return True
-
-    def merge(self) -> nn.Linear:
-        weight = self.base.weight + self.scaling * (self.lora_b @ self.lora_a)
-        return _build_merged_linear(self.base, weight)
-
-    def matrix_parameters(self) -> tuple[nn.Parameter, ...]:
-        return (self.lora_a, self.lora_b)

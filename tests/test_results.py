@@ -29,14 +29,10 @@ def card() -> dict:
                    "replaced": ["model.layers.0.self_attn.q_proj"]},
         train_report=TrainReport(
             step_losses=[2.0, 1.0], epoch_losses=[1.5], validation_losses=[2.4, 1.6],
-            fraction_inside_grid=[0.87],
             grad_norms=[0.8, 0.5], peak_memory_bytes=4_000_000_000, seconds=4200.0,
-            optimizer_coverage={"adamw": 1234, "muon": 0},
         ),
         metrics={"exact_match": 0.41, "execution_accuracy": 0.55,
                  "exact_match_by_hardness": {"easy": 0.7, "all": 0.41}},
-        spline_stats={"model.layers.0.self_attn.q_proj": {"mean": 0.03, "max": 0.11,
-                                                          "fraction_inside_grid": 0.87}},
     )
 
 
@@ -44,7 +40,6 @@ def test_card_carries_everything_needed_to_reproduce(card: dict) -> None:
     assert set(card) >= {
         "run_id", "config", "versions", "git_commit", "metrics",
         "peak_memory_bytes", "train_seconds", "trainable_parameters",
-        "optimizer_coverage", "fraction_inside_grid", "spline_stats",
     }
 
 
@@ -74,7 +69,6 @@ def test_absent_execution_accuracy_is_null_not_zero() -> None:
         config=load_config(BASE), injection={"trainable_parameters": 1, "total_parameters": 2,
                                              "replaced": []},
         train_report=TrainReport(), metrics={"exact_match": 0.1, "execution_accuracy": None},
-        spline_stats=None,
     )
     assert card["metrics"]["execution_accuracy"] is None
 
@@ -111,7 +105,6 @@ def test_baseline_card_leaves_training_fields_null() -> None:
         injection={"trainable_parameters": None, "total_parameters": 500000, "replaced": []},
         train_report=None,
         metrics={"exact_match": 0.2, "execution_accuracy": None},
-        spline_stats=None,
     )
 
     assert card["method"] == "none"
@@ -119,9 +112,8 @@ def test_baseline_card_leaves_training_fields_null() -> None:
     assert card["optimizer"] is None
     assert card["total_parameters"] == 500000
     for field in (
-        "trainable_parameters", "train_seconds", "peak_memory_bytes", "optimizer_coverage",
-        "step_losses", "epoch_losses", "validation_losses", "grad_norms", "fraction_inside_grid",
-        "spline_stats",
+        "trainable_parameters", "train_seconds", "peak_memory_bytes",
+        "step_losses", "epoch_losses", "validation_losses", "grad_norms",
     ):
         assert card[field] is None, field
     assert card["adapted_modules"] == 0
@@ -146,7 +138,6 @@ def test_card_records_data_and_model_versions() -> None:
         injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
         train_report=TrainReport(),
         metrics={"exact_match": 0.1, "execution_accuracy": None},
-        spline_stats=None,
         data_files={"train_spider.json": "abc"},
         model_revision="0123abcd",
     )
@@ -154,19 +145,9 @@ def test_card_records_data_and_model_versions() -> None:
     assert card["model_revision"] == "0123abcd"
 
 
-def test_card_records_generation_latency() -> None:
-    latency = {"seconds_per_token": 0.02, "total_seconds": 2.56, "tokens": 128,
-               "merged": False, "device": "cuda"}
-    card = build_result_card(
-        config=load_config(BASE),
-        injection={"trainable_parameters": 1, "total_parameters": 2, "replaced": []},
-        train_report=TrainReport(),
-        metrics={"exact_match": 0.1, "execution_accuracy": None},
-        spline_stats=None,
-        latency=latency,
-    )
-    assert card["latency"] == latency
 
 
-def test_latency_is_null_when_not_measured(card: dict) -> None:
-    assert card["latency"] is None
+
+
+def test_card_has_no_removed_research_fields(card: dict) -> None:
+    assert not {"optimizer_coverage", "fraction_inside_grid", "spline_stats", "latency"} & card.keys()

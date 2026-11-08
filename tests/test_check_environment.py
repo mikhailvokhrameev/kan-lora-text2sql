@@ -28,11 +28,6 @@ def test_torch_check_reports_version(module) -> None:
     assert "2." in check.detail
 
 
-def test_muon_check_matches_torch_optim(module) -> None:
-    import torch
-
-    check = module.check_muon()
-    assert check.ok is hasattr(torch.optim, "Muon")
 
 
 def test_nltk_punkt_check_matches_actual_availability(module) -> None:

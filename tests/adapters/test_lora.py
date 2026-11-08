@@ -58,38 +58,12 @@ def test_parameter_count_matches_formula(adapter: LoRALinear) -> None:
     assert adapter.trainable_parameter_count() == expected
 
 
-def test_merged_linear_reproduces_adapter_output(base: nn.Linear, adapter: LoRALinear) -> None:
-    """LoRA сливается с весами и на инференсе не стоит ничего — в этом её отличие."""
-    with torch.no_grad():
-        adapter.lora_b.normal_()
-
-    assert adapter.can_merge is True
-    merged = adapter.merge()
-    x = torch.randn(16, IN_FEATURES, dtype=torch.float64)
-    assert torch.allclose(merged(x), adapter(x), atol=1e-10)
 
 
-def test_merge_matches_base_bias_dtype_and_device(base: nn.Linear, adapter: LoRALinear) -> None:
-    merged = adapter.merge()
-    assert isinstance(merged, nn.Linear)
-    assert (merged.bias is not None) == (base.bias is not None)
-    assert merged.weight.dtype == base.weight.dtype
-    assert merged.weight.device == base.weight.device
 
 
-def test_merge_omits_bias_when_base_has_none() -> None:
-    base_without_bias = nn.Linear(IN_FEATURES, OUT_FEATURES, bias=False, dtype=torch.float64)
-    adapter_without_bias = LoRALinear(base_without_bias, AdapterConfig(rank=RANK, alpha=2.0 * RANK))
-    merged = adapter_without_bias.merge()
-    assert merged.bias is None
 
 
-def test_merge_does_not_touch_the_original_base(base: nn.Linear, adapter: LoRALinear) -> None:
-    original = base.weight.detach().clone()
-    with torch.no_grad():
-        adapter.lora_b.normal_()
-    adapter.merge()
-    assert torch.equal(base.weight, original)
 
 
 def test_gradients_reach_both_matrices(adapter: LoRALinear) -> None:
@@ -100,7 +74,3 @@ def test_gradients_reach_both_matrices(adapter: LoRALinear) -> None:
     assert adapter.lora_a.grad is not None
     assert adapter.lora_b.grad is not None
     assert adapter.base.weight.grad is None
-
-
-def test_matrix_parameters_are_lora_a_and_lora_b(adapter: LoRALinear) -> None:
-    assert adapter.matrix_parameters() == (adapter.lora_a, adapter.lora_b)

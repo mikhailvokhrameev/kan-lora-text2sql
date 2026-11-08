@@ -61,30 +61,17 @@ def build_result_card(
     injection: dict,
     train_report: TrainReport | None,
     metrics: dict,
-    spline_stats: dict | None,
     data_files: dict[str, str | None] | None = None,
     model_revision: str | None = None,
-    latency: dict | None = None,
 ) -> dict:
-    """Собирает карточку прогона.
-
-    train_report=None — прогон без обучения (`method: none`): поля обучения
-    (пик видеопамяти и время обучения, покрытие оптимизатором, потери на обучении
-    и на валидации, доля
-    активаций в сетке) пишутся null — «не обучалась», а не «ноль». Оптимизатора
-    у такого прогона нет, поэтому и `optimizer` — null, хотя замороженная
-    конфигурация в `config` по-прежнему содержит секцию optimizer из YAML.
-
-    latency — задержка генерации без слияния адаптера (`eval/latency.py`);
-    null — не мерили.
-    """
+    """Собирает карточку прогона; поля обучения равны null без обучения."""
     trained = train_report is not None
     return {
         "run_id": config.run_id,
         "method": config.method,
         "dataset": config.dataset,
         "seed": config.seed,
-        "optimizer": config.optimizer.name if config.method != "none" else None,
+        "optimizer": "adamw" if config.method != "none" else None,
         "config": config_to_dict(config),
         "versions": collect_versions(),
         "git_commit": git_commit(),
@@ -98,14 +85,10 @@ def build_result_card(
         "trainable_parameters": injection["trainable_parameters"],
         "total_parameters": injection["total_parameters"],
         "adapted_modules": len(injection["replaced"]),
-        "optimizer_coverage": train_report.optimizer_coverage if trained else None,
         "step_losses": train_report.step_losses if trained else None,
         "epoch_losses": train_report.epoch_losses if trained else None,
         "validation_losses": train_report.validation_losses if trained else None,
         "grad_norms": train_report.grad_norms if trained else None,
-        "fraction_inside_grid": train_report.fraction_inside_grid if trained else None,
-        "spline_stats": spline_stats,
-        "latency": latency,
     }
 
 
